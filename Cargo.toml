@@ -1,0 +1,19 @@
+[workspace]
+members = ["."]
+resolver = "3"
+
+[package]
+name = "institution"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Executable Goguen-style institutions and satisfaction-law testing"
+license = "MIT"
+repository = "https://github.com/ctoth/institution"
+homepage = "https://github.com/ctoth/institution"
+readme = "README.md"
+keywords = ["logic", "formal-methods", "institutions"]
+categories = ["science"]
+publish = true
+
+[dependencies]
