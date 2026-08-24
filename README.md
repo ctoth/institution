@@ -2,7 +2,7 @@
 
 Executable Goguen-style institutions and satisfaction-law testing in Rust.
 
-This workspace contains one publishable crate, `institution`. Its core trait
+This workspace contains two publishable crates. The `institution` core trait
 models the executable operations of a Goguen-style institution with associated
 signature, signature morphism, sentence, model, and error types. Signature
 morphisms expose their source and target signatures explicitly; sentence
@@ -15,6 +15,11 @@ whether those two observations agree; it does not prove the satisfaction
 condition universally. Its non-vacuity helper only reports whether the supplied
 well-formed, deterministic examples produced both truth values. It cannot
 establish global non-vacuity.
+
+`institution-conservation` is a downstream adapter that realizes exact
+conservation laws and finite traces as an institution. It depends on the
+independent conservation foundation; neither foundation depends on the
+adapter.
 
 ## Architecture boundary
 

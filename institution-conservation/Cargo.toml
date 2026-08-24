@@ -1,0 +1,21 @@
+[package]
+name = "institution-conservation"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "The institution of exact conservation laws and finite traces"
+license = "MIT"
+repository = "https://github.com/ctoth/institution"
+homepage = "https://github.com/ctoth/institution"
+readme = "../README.md"
+publish = true
+
+[dependencies]
+conservation-core = { git = "https://github.com/ctoth/conservation.git", rev = "7a0653834681ad82846702baa99df3d7500235e1" }
+conservation-trace = { git = "https://github.com/ctoth/conservation.git", rev = "7a0653834681ad82846702baa99df3d7500235e1" }
+institution = { version = "0.1.0", path = ".." }
+
+[dev-dependencies]
+conservation-linear = { git = "https://github.com/ctoth/conservation.git", rev = "7a0653834681ad82846702baa99df3d7500235e1" }
+num-bigint = "0.4"
+num-rational = "0.4"

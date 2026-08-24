@@ -1,5 +1,5 @@
 [workspace]
-members = ["."]
+members = [".", "institution-conservation"]
 resolver = "3"
 
 [package]
