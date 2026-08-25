@@ -464,3 +464,51 @@ fn malformed_memberships_error_instead_of_returning_false() {
         Err(Error::ModelSignatureMismatch)
     );
 }
+
+#[test]
+fn conservation_adapter_observes_signature_category_and_functor_laws() {
+    let source = signature(&[("A", "quantity"), ("B", "quantity")]);
+    let middle = signature(&[("X", "mass"), ("Y", "mass")]);
+    let target = signature(&[("U", "energy"), ("V", "energy")]);
+    let last = signature(&[("I", "currency"), ("J", "currency")]);
+    let first = AxisRenaming::new(
+        source.clone(),
+        middle,
+        [(axis("A"), axis("X")), (axis("B"), axis("Y"))],
+        [(kind("quantity"), kind("mass"))],
+    )
+    .unwrap();
+    let second = AxisRenaming::new(
+        first.target().clone(),
+        target.clone(),
+        [(axis("X"), axis("U")), (axis("Y"), axis("V"))],
+        [(kind("mass"), kind("energy"))],
+    )
+    .unwrap();
+    let third = AxisRenaming::new(
+        target.clone(),
+        last,
+        [(axis("U"), axis("I")), (axis("V"), axis("J"))],
+        [(kind("energy"), kind("currency"))],
+    )
+    .unwrap();
+    let law = BalanceLaw::new(
+        kind("quantity"),
+        [(axis("A"), q(1)), (axis("B"), q(1))],
+        Provenance::Declared,
+    )
+    .unwrap();
+    let model = TraceModel::new(
+        target.clone(),
+        vec![state(&[("U", 3), ("V", 7)]), state(&[("U", 4), ("V", 6)])],
+    )
+    .unwrap();
+    let institution = ConservationInstitution;
+
+    assert!(laws::check_signature_identity(&institution, &first).unwrap());
+    assert!(laws::check_signature_associativity(&institution, &first, &second, &third,).unwrap());
+    assert!(laws::check_sentence_identity(&institution, &source, &law).unwrap());
+    assert!(laws::check_sentence_composition(&institution, &first, &second, &law,).unwrap());
+    assert!(laws::check_model_identity(&institution, &target, &model).unwrap());
+    assert!(laws::check_model_composition(&institution, &first, &second, &model,).unwrap());
+}

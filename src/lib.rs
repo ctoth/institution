@@ -13,7 +13,11 @@ pub mod laws;
 /// For a signature morphism `m: source -> target`, sentence translation is
 /// covariant (`source` to `target`) and model reduct is contravariant (`target`
 /// to `source`). This trait does not encode a signature category or assert
-/// identity, composition, functoriality, or universal satisfaction laws.
+/// Implementations provide the identity and composition operations of the
+/// signature category. The type system does not prove their laws; the
+/// observations in [`laws`] make those obligations executable on supplied
+/// examples. `Model` represents objects of each model category; model
+/// homomorphisms are outside this first executable boundary.
 pub trait Institution {
     /// The language vocabulary over which sentences and models are formed.
     type Signature;
@@ -35,6 +39,17 @@ pub trait Institution {
 
     /// Returns the target signature of `morphism`.
     fn target<'a>(&self, morphism: &'a Self::SignatureMorphism) -> &'a Self::Signature;
+
+    /// Constructs the identity signature morphism on `signature`.
+    fn identity(&self, signature: &Self::Signature)
+    -> Result<Self::SignatureMorphism, Self::Error>;
+
+    /// Composes `first: A -> B` with `second: B -> C`, producing `A -> C`.
+    fn compose(
+        &self,
+        first: &Self::SignatureMorphism,
+        second: &Self::SignatureMorphism,
+    ) -> Result<Self::SignatureMorphism, Self::Error>;
 
     /// Translates a source sentence along `morphism` into a target sentence.
     fn translate_sentence(

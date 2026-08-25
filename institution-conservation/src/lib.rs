@@ -185,6 +185,51 @@ impl AxisRenaming {
     pub fn target(&self) -> &ConservationSignature {
         &self.target
     }
+
+    fn identity(signature: &ConservationSignature) -> Result<Self, Error> {
+        Self::new(
+            signature.clone(),
+            signature.clone(),
+            signature
+                .axes()
+                .map(|(axis, _)| (axis.clone(), axis.clone())),
+            signature.kinds().map(|kind| (kind.clone(), kind.clone())),
+        )
+    }
+
+    fn compose(first: &Self, second: &Self) -> Result<Self, Error> {
+        if first.target != second.source {
+            return Err(Error::NonComposableRenamings);
+        }
+        let mappings = first
+            .forward
+            .iter()
+            .map(|(source, middle)| {
+                let target = second
+                    .forward
+                    .get(middle)
+                    .expect("validated second renaming covers its source");
+                (source.clone(), target.clone())
+            })
+            .collect::<Vec<_>>();
+        let kind_mappings = first
+            .kind_forward
+            .iter()
+            .map(|(source, middle)| {
+                let target = second
+                    .kind_forward
+                    .get(middle)
+                    .expect("validated second kind renaming covers its source");
+                (source.clone(), target.clone())
+            })
+            .collect::<Vec<_>>();
+        Self::new(
+            first.source.clone(),
+            second.target.clone(),
+            mappings,
+            kind_mappings,
+        )
+    }
 }
 
 /// A validated model containing at least two exact trace states.
@@ -276,6 +321,8 @@ pub enum Error {
         mapped_targets: usize,
         target_axes: usize,
     },
+    /// Two signature renamings did not share the required middle signature.
+    NonComposableRenamings,
     /// A trace model had fewer than two states.
     TraceTooShort { states: usize },
     /// A trace state's exact axis set differed from its model signature.
@@ -372,6 +419,9 @@ impl fmt::Display for Error {
                 formatter,
                 "renaming covers {mapped_targets} of {target_axes} target axes"
             ),
+            Self::NonComposableRenamings => {
+                formatter.write_str("signature renamings are not composable")
+            }
             Self::TraceTooShort { states } => {
                 write!(
                     formatter,
@@ -450,6 +500,21 @@ impl Institution for ConservationInstitution {
 
     fn target<'a>(&self, morphism: &'a Self::SignatureMorphism) -> &'a Self::Signature {
         morphism.target()
+    }
+
+    fn identity(
+        &self,
+        signature: &Self::Signature,
+    ) -> Result<Self::SignatureMorphism, Self::Error> {
+        AxisRenaming::identity(signature)
+    }
+
+    fn compose(
+        &self,
+        first: &Self::SignatureMorphism,
+        second: &Self::SignatureMorphism,
+    ) -> Result<Self::SignatureMorphism, Self::Error> {
+        AxisRenaming::compose(first, second)
     }
 
     fn translate_sentence(

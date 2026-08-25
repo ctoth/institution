@@ -11,7 +11,7 @@ impl Signature {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct Morphism {
     source: Signature,
     target: Signature,
@@ -31,6 +31,7 @@ enum TestError {
     MorphismTargetOutsideSignature(String),
     InvalidModelAtom(String),
     UnknownSymbol(String),
+    NonComposableMorphisms,
 }
 
 struct PropositionalLogic;
@@ -82,6 +83,50 @@ impl Institution for PropositionalLogic {
 
     fn target<'a>(&self, morphism: &'a Self::SignatureMorphism) -> &'a Self::Signature {
         &morphism.target
+    }
+
+    fn identity(
+        &self,
+        signature: &Self::Signature,
+    ) -> Result<Self::SignatureMorphism, Self::Error> {
+        Ok(Morphism {
+            source: signature.clone(),
+            target: signature.clone(),
+            symbols: signature
+                .0
+                .iter()
+                .map(|symbol| (symbol.clone(), symbol.clone()))
+                .collect(),
+        })
+    }
+
+    fn compose(
+        &self,
+        first: &Self::SignatureMorphism,
+        second: &Self::SignatureMorphism,
+    ) -> Result<Self::SignatureMorphism, Self::Error> {
+        Self::validate_morphism(first)?;
+        Self::validate_morphism(second)?;
+        if first.target != second.source {
+            return Err(TestError::NonComposableMorphisms);
+        }
+        let symbols = first
+            .symbols
+            .iter()
+            .map(|(source, middle)| {
+                second
+                    .symbols
+                    .get(middle)
+                    .cloned()
+                    .map(|target| (source.clone(), target))
+                    .ok_or_else(|| TestError::UnknownSymbol(middle.clone()))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Morphism {
+            source: first.source.clone(),
+            target: second.target.clone(),
+            symbols,
+        })
     }
 
     fn translate_sentence(
@@ -156,6 +201,21 @@ impl Institution for NonCommutingLogic {
         PropositionalLogic.target(morphism)
     }
 
+    fn identity(
+        &self,
+        signature: &Self::Signature,
+    ) -> Result<Self::SignatureMorphism, Self::Error> {
+        PropositionalLogic.identity(signature)
+    }
+
+    fn compose(
+        &self,
+        first: &Self::SignatureMorphism,
+        second: &Self::SignatureMorphism,
+    ) -> Result<Self::SignatureMorphism, Self::Error> {
+        PropositionalLogic.compose(first, second)
+    }
+
     fn translate_sentence(
         &self,
         morphism: &Self::SignatureMorphism,
@@ -198,6 +258,70 @@ fn fixture() -> (PropositionalLogic, Morphism, Model, String) {
     };
 
     (PropositionalLogic, morphism, model, String::from("p"))
+}
+
+fn chain() -> (Morphism, Morphism, Morphism, Model, String) {
+    let a = Signature::new(&["p"]);
+    let b = Signature::new(&["q"]);
+    let c = Signature::new(&["r"]);
+    let d = Signature::new(&["s"]);
+    let first = Morphism {
+        source: a,
+        target: b.clone(),
+        symbols: BTreeMap::from([(String::from("p"), String::from("q"))]),
+    };
+    let second = Morphism {
+        source: b,
+        target: c.clone(),
+        symbols: BTreeMap::from([(String::from("q"), String::from("r"))]),
+    };
+    let third = Morphism {
+        source: c,
+        target: d.clone(),
+        symbols: BTreeMap::from([(String::from("r"), String::from("s"))]),
+    };
+    let model = Model {
+        signature: d,
+        true_atoms: BTreeSet::from([String::from("s")]),
+    };
+    (first, second, third, model, String::from("p"))
+}
+
+#[test]
+fn signature_category_and_sentence_model_functor_laws_hold() -> Result<(), TestError> {
+    let institution = PropositionalLogic;
+    let (first, second, third, target_model, source_sentence) = chain();
+
+    assert!(laws::check_signature_identity(&institution, &first)?);
+    assert!(laws::check_signature_associativity(
+        &institution,
+        &first,
+        &second,
+        &third,
+    )?);
+    assert!(laws::check_sentence_identity(
+        &institution,
+        &first.source,
+        &source_sentence,
+    )?);
+    assert!(laws::check_sentence_composition(
+        &institution,
+        &first,
+        &second,
+        &source_sentence,
+    )?);
+    assert!(laws::check_model_identity(
+        &institution,
+        &third.target,
+        &target_model,
+    )?);
+    assert!(laws::check_model_composition(
+        &institution,
+        &second,
+        &third,
+        &target_model,
+    )?);
+    Ok(())
 }
 
 #[test]

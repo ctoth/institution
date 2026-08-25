@@ -7,14 +7,13 @@ models the executable operations of a Goguen-style institution with associated
 signature, signature morphism, sentence, model, and error types. Signature
 morphisms expose their source and target signatures explicitly; sentence
 translation is covariant, model reduct is contravariant, and satisfaction is
-executable.
+executable. Identity and composition make the signature category executable.
 
-The `institution::laws` module observes both sides of one supplied satisfaction
-square. For deterministic operations and well-formed inputs, its result says
-whether those two observations agree; it does not prove the satisfaction
-condition universally. Its non-vacuity helper only reports whether the supplied
-well-formed, deterministic examples produced both truth values. It cannot
-establish global non-vacuity.
+The `institution::laws` module observes signature-category, sentence-functor,
+model-reduct, and satisfaction laws on supplied examples. For deterministic
+operations and well-formed inputs, the results say whether those observations
+agree; they do not prove any law universally. Its non-vacuity helper only
+reports whether supplied examples produced both truth values.
 
 `institution-conservation` is a downstream adapter that realizes exact
 conservation laws and finite traces as an institution. It depends on the
@@ -23,10 +22,8 @@ adapter.
 
 ## Architecture boundary
 
-The crate defines the executable institution boundary directly. It does not
-provide a generic category framework, derive or helper macros, asynchronous
-operations, or comorphism APIs. In particular, the trait does not encode or
-claim to verify signature-category identity or composition laws, sentence-
-translation functoriality, model-reduct functoriality, or universal satisfaction
-invariance. Implementations and downstream test suites remain responsible for
-those laws.
+The crate defines the executable institution boundary directly rather than
+depending on a generic category framework. It does not provide model
+homomorphisms, derive macros, asynchronous operations, or comorphism APIs.
+Its law helpers observe examples; implementations and downstream test suites
+remain responsible for establishing the laws over their intended domains.

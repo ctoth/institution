@@ -1,10 +1,103 @@
-//! Reusable observations for individual satisfaction squares and test cases.
+//! Reusable observations for institution laws on supplied examples.
 //!
 //! These helpers execute supplied operations and do not prove institution laws
 //! universally. Implementations remain responsible for deterministic behavior,
-//! input well-formedness, signature-category laws, and functoriality laws.
+//! input well-formedness and universal validity of the observed laws.
 
 use crate::Institution;
+
+/// Observes both identity laws of the signature category for one morphism.
+pub fn check_signature_identity<I>(
+    institution: &I,
+    morphism: &I::SignatureMorphism,
+) -> Result<bool, I::Error>
+where
+    I: Institution,
+    I::SignatureMorphism: PartialEq,
+{
+    let left_identity = institution.identity(institution.source(morphism))?;
+    let right_identity = institution.identity(institution.target(morphism))?;
+    Ok(&institution.compose(&left_identity, morphism)? == morphism
+        && &institution.compose(morphism, &right_identity)? == morphism)
+}
+
+/// Observes associativity of three composable signature morphisms.
+pub fn check_signature_associativity<I>(
+    institution: &I,
+    first: &I::SignatureMorphism,
+    second: &I::SignatureMorphism,
+    third: &I::SignatureMorphism,
+) -> Result<bool, I::Error>
+where
+    I: Institution,
+    I::SignatureMorphism: PartialEq,
+{
+    let first_then_second = institution.compose(first, second)?;
+    let second_then_third = institution.compose(second, third)?;
+    Ok(institution.compose(&first_then_second, third)?
+        == institution.compose(first, &second_then_third)?)
+}
+
+/// Observes preservation of identities by sentence translation.
+pub fn check_sentence_identity<I>(
+    institution: &I,
+    signature: &I::Signature,
+    sentence: &I::Sentence,
+) -> Result<bool, I::Error>
+where
+    I: Institution,
+    I::Sentence: PartialEq,
+{
+    let identity = institution.identity(signature)?;
+    Ok(&institution.translate_sentence(&identity, sentence)? == sentence)
+}
+
+/// Observes preservation of composition by sentence translation.
+pub fn check_sentence_composition<I>(
+    institution: &I,
+    first: &I::SignatureMorphism,
+    second: &I::SignatureMorphism,
+    sentence: &I::Sentence,
+) -> Result<bool, I::Error>
+where
+    I: Institution,
+    I::Sentence: PartialEq,
+{
+    let composite = institution.compose(first, second)?;
+    let once = institution.translate_sentence(first, sentence)?;
+    Ok(institution.translate_sentence(&composite, sentence)?
+        == institution.translate_sentence(second, &once)?)
+}
+
+/// Observes preservation of identities by model reduct.
+pub fn check_model_identity<I>(
+    institution: &I,
+    signature: &I::Signature,
+    model: &I::Model,
+) -> Result<bool, I::Error>
+where
+    I: Institution,
+    I::Model: PartialEq,
+{
+    let identity = institution.identity(signature)?;
+    Ok(&institution.reduct(&identity, model)? == model)
+}
+
+/// Observes contravariant preservation of composition by model reduct.
+pub fn check_model_composition<I>(
+    institution: &I,
+    first: &I::SignatureMorphism,
+    second: &I::SignatureMorphism,
+    model: &I::Model,
+) -> Result<bool, I::Error>
+where
+    I: Institution,
+    I::Model: PartialEq,
+{
+    let composite = institution.compose(first, second)?;
+    let once = institution.reduct(second, model)?;
+    Ok(institution.reduct(&composite, model)? == institution.reduct(first, &once)?)
+}
 
 /// The two satisfaction observations made for one supplied square.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
