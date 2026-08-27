@@ -647,7 +647,6 @@ impl StockFlowInstitution {
                     certificate.law().coefficients().map(|(axis, coefficient)| {
                         (morphism.axes.forward[axis].clone(), coefficient.clone())
                     }),
-                    certificate.source(),
                 )?;
                 StockFlowSentence::OpenBalance(renamed.open_balance(value.id().clone()))
             }

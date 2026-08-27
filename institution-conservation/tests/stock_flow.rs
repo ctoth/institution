@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use conservation_core::{AxisId, BalanceLaw, Grade, GradedLaw, KindId, Provenance};
 use conservation_dynamics::{FlowSpec, FlowTopology, ProcessId, StockDefinition, StockId};
-use conservation_linear::NullspaceSource;
 use conservation_stock_flow::{
     BoundaryCorrespondence, BoundaryId, ChannelId, ExactAmounts, FlowId, GradedStateLaw,
     LedgerDefinition, LedgerId, LinearFlowConstraint, SentenceId, StockAxisDefinition,
@@ -329,7 +328,6 @@ fn sentences(signature: &StockFlowSignature, names: Names) -> Vec<StockFlowSente
             (axis(names.left_axis), q(1)),
             (axis(names.right_axis), q(1)),
         ],
-        NullspaceSource::Incidence,
     )
     .unwrap();
     vec![
@@ -439,6 +437,33 @@ fn all_category_functor_and_satisfaction_laws_hold_for_every_family() {
 }
 
 #[test]
+fn every_sentence_family_preserves_false_satisfaction_through_reduct() {
+    let source = signature(NEUTRAL);
+    let morphism = renaming(NEUTRAL, source.clone(), ECOLOGY, signature(ECOLOGY));
+    let source_sentences = sentences(&source, NEUTRAL);
+    let false_models = [
+        model_with_values(morphism.target(), ECOLOGY, -2, 12, 3, 2, 1, false, true),
+        model_with_values(morphism.target(), ECOLOGY, -2, 12, 4, 2, 1, true, true),
+        model_with_values(morphism.target(), ECOLOGY, -2, 12, 3, 2, 1, true, false),
+        model_with_values(morphism.target(), ECOLOGY, -2, 12, 3, 2, 1, false, true),
+        model_with_values(morphism.target(), ECOLOGY, -2, 12, 3, 2, 1, false, true),
+    ];
+
+    for (sentence, target_model) in source_sentences.iter().zip(&false_models) {
+        let square = laws::check_satisfaction_square(
+            &StockFlowInstitution,
+            &morphism,
+            sentence,
+            target_model,
+        )
+        .unwrap();
+        assert!(square.holds());
+        assert!(!square.translated_sentence_satisfied());
+        assert!(!square.reduced_model_satisfies_source_sentence());
+    }
+}
+
+#[test]
 fn one_neutral_stock_flow_spec_instantiates_ecological_and_economic_models() {
     let source = signature(NEUTRAL);
     let ecological = renaming(NEUTRAL, source.clone(), ECOLOGY, signature(ECOLOGY));
@@ -513,7 +538,6 @@ fn malformed_morphisms_and_model_membership_are_rejected() {
             (axis(ECONOMY.left_axis), q(1)),
             (axis(ECONOMY.right_axis), q(1)),
         ],
-        NullspaceSource::Incidence,
     )
     .unwrap();
     let foreign = StockFlowSentence::OpenBalance(
