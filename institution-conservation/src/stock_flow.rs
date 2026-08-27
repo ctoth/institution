@@ -610,6 +610,7 @@ impl StockFlowInstitution {
             }
             StockFlowSentence::LinearFlow(value) => {
                 StockFlowSentence::LinearFlow(LinearFlowConstraint::new(
+                    morphism.target().carrier(),
                     value.id().clone(),
                     morphism.kinds.forward[value.kind()].clone(),
                     value.coefficients().iter().map(|(flow, coefficient)| {

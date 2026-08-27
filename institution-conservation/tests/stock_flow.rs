@@ -334,6 +334,7 @@ fn sentences(signature: &StockFlowSignature, names: Names) -> Vec<StockFlowSente
         StockFlowSentence::Transition(TransitionEquation::new(sentence("transition"))),
         StockFlowSentence::LinearFlow(
             LinearFlowConstraint::new(
+                signature.carrier(),
                 sentence("linear-flow"),
                 quantity,
                 [(flow(names.flow), q(1))],
@@ -366,6 +367,7 @@ fn every_sentence_family_has_true_and_false_semantic_evidence() {
     let invalid_ledger = model_with_values(&signature, NEUTRAL, -2, 12, 3, 2, 1, true, false);
     let false_linear = StockFlowSentence::LinearFlow(
         LinearFlowConstraint::new(
+            signature.carrier(),
             sentence("false-linear"),
             kind(NEUTRAL.kind),
             [(flow(NEUTRAL.flow), q(1))],
