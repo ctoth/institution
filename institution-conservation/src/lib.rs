@@ -15,6 +15,8 @@ use conservation_core::{AxisId, BalanceLaw, BalanceLawError, GradedLaw, KindId};
 use conservation_trace::{LawVerdict, TraceError, TraceState, TraceStateError, check_law};
 use institution::Institution;
 
+pub mod stock_flow;
+
 /// A nonempty assignment of every axis to its quantitative kind.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConservationSignature {

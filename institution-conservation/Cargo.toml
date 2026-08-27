@@ -11,11 +11,14 @@ readme = "../README.md"
 publish = true
 
 [dependencies]
-conservation-core = { git = "https://github.com/ctoth/conservation.git", rev = "dd21f6b1fee852b62328dac8aaf7138e45551272" }
-conservation-trace = { git = "https://github.com/ctoth/conservation.git", rev = "dd21f6b1fee852b62328dac8aaf7138e45551272" }
+conservation-core = { version = "0.1.0", path = "../../conservation/conservation-core" }
+conservation-stock-flow = { version = "0.1.0", path = "../../conservation/conservation-stock-flow" }
+conservation-trace = { version = "0.1.0", path = "../../conservation/conservation-trace" }
 institution = { version = "0.1.0", path = ".." }
 
 [dev-dependencies]
-conservation-linear = { git = "https://github.com/ctoth/conservation.git", rev = "dd21f6b1fee852b62328dac8aaf7138e45551272" }
+conservation-dynamics = { version = "0.1.0", path = "../../conservation/conservation-dynamics" }
+conservation-linear = { version = "0.1.0", path = "../../conservation/conservation-linear" }
 num-bigint = "0.4"
 num-rational = "0.4"
+proptest = "1"
