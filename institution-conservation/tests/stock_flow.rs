@@ -580,6 +580,87 @@ fn signed_observations_are_valid_but_negative_flow_magnitudes_are_rejected() {
 
 proptest! {
     #[test]
+    fn generated_models_observe_every_category_and_satisfaction_law(
+        left_before in -100i64..100,
+        right_before in -100i64..100,
+        internal in 0i64..20,
+        input in 0i64..20,
+        output in 0i64..20,
+        equation_holds in any::<bool>(),
+        ledgers_hold in any::<bool>(),
+        family in 0usize..5,
+    ) {
+        let source = signature(NEUTRAL);
+        let middle = signature(ECOLOGY);
+        let target = signature(ECONOMY);
+        let last = signature(FOURTH);
+        let first = renaming(NEUTRAL, source.clone(), ECOLOGY, middle);
+        let second = renaming(ECOLOGY, first.target().clone(), ECONOMY, target.clone());
+        let third = renaming(ECONOMY, target.clone(), FOURTH, last);
+        let ecological_model = model_with_values(
+            first.target(),
+            ECOLOGY,
+            left_before,
+            right_before,
+            internal,
+            input,
+            output,
+            equation_holds,
+            ledgers_hold,
+        );
+        let economic_model = model_with_values(
+            &target,
+            ECONOMY,
+            left_before,
+            right_before,
+            internal,
+            input,
+            output,
+            equation_holds,
+            ledgers_hold,
+        );
+        let source_sentences = sentences(&source, NEUTRAL);
+        let source_sentence = &source_sentences[family];
+
+        prop_assert!(laws::check_signature_identity(&StockFlowInstitution, &first).unwrap());
+        prop_assert!(laws::check_signature_associativity(
+            &StockFlowInstitution,
+            &first,
+            &second,
+            &third,
+        ).unwrap());
+        prop_assert!(laws::check_sentence_identity(
+            &StockFlowInstitution,
+            &source,
+            source_sentence,
+        ).unwrap());
+        prop_assert!(laws::check_sentence_composition(
+            &StockFlowInstitution,
+            &first,
+            &second,
+            source_sentence,
+        ).unwrap());
+        prop_assert!(laws::check_model_identity(
+            &StockFlowInstitution,
+            first.target(),
+            &ecological_model,
+        ).unwrap());
+        prop_assert!(laws::check_model_composition(
+            &StockFlowInstitution,
+            &first,
+            &second,
+            &economic_model,
+        ).unwrap());
+        let square = laws::check_satisfaction_square(
+            &StockFlowInstitution,
+            &first,
+            source_sentence,
+            &ecological_model,
+        ).unwrap();
+        prop_assert!(square.holds());
+    }
+
+    #[test]
     fn generated_signed_states_and_nonnegative_flows_survive_reduct(
         left_before in -100i64..100,
         right_before in -100i64..100,
