@@ -1,13 +1,18 @@
 #![forbid(unsafe_code)]
 
-//! The institution of exact conservation laws and finite traces.
+//! The institution of graded conservation sentences and finite traces.
+//!
+//! Sentences are [`GradedLaw`]s: one exact linear form read as an invariant
+//! balance, a nonnegativity constraint, or a nondecreasing (dissipation)
+//! constraint. Translation renames the form and preserves the grade, so one
+//! satisfaction condition covers every grade.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error as StdError;
 use std::fmt;
 
-use conservation_core::{AxisId, BalanceLaw, BalanceLawError, KindId};
-use conservation_trace::{TraceError, TraceState, TraceStateError, TraceVerdict, check_trace};
+use conservation_core::{AxisId, BalanceLaw, BalanceLawError, GradedLaw, KindId};
+use conservation_trace::{LawVerdict, TraceError, TraceState, TraceStateError, check_law};
 use institution::Institution;
 
 /// A nonempty assignment of every axis to its quantitative kind.
@@ -462,16 +467,17 @@ pub struct ConservationInstitution;
 impl ConservationInstitution {
     fn validate_sentence(
         signature: &ConservationSignature,
-        sentence: &BalanceLaw,
+        sentence: &GradedLaw,
     ) -> Result<(), Error> {
-        for (axis, _) in sentence.coefficients() {
+        let form = sentence.form();
+        for (axis, _) in form.coefficients() {
             let Some(signature_kind) = signature.kind(axis) else {
                 return Err(Error::SentenceAxisOutsideSignature(axis.clone()));
             };
-            if sentence.kind() != signature_kind {
+            if form.kind() != signature_kind {
                 return Err(Error::SentenceKindMismatch {
                     axis: axis.clone(),
-                    sentence_kind: sentence.kind().clone(),
+                    sentence_kind: form.kind().clone(),
                     signature_kind: signature_kind.clone(),
                 });
             }
@@ -490,7 +496,7 @@ impl ConservationInstitution {
 impl Institution for ConservationInstitution {
     type Signature = ConservationSignature;
     type SignatureMorphism = AxisRenaming;
-    type Sentence = BalanceLaw;
+    type Sentence = GradedLaw;
     type Model = TraceModel;
     type Error = Error;
 
@@ -523,21 +529,23 @@ impl Institution for ConservationInstitution {
         sentence: &Self::Sentence,
     ) -> Result<Self::Sentence, Self::Error> {
         Self::validate_sentence(morphism.source(), sentence)?;
+        let form = sentence.form();
         let target_kind = morphism
             .kind_forward
-            .get(sentence.kind())
+            .get(form.kind())
             .cloned()
-            .ok_or_else(|| Error::KindMappingSourceOutsideSignature(sentence.kind().clone()))?;
+            .ok_or_else(|| Error::KindMappingSourceOutsideSignature(form.kind().clone()))?;
         let mut coefficients = Vec::new();
-        for (source_axis, coefficient) in sentence.coefficients() {
+        for (source_axis, coefficient) in form.coefficients() {
             let target_axis =
                 morphism.forward.get(source_axis).cloned().ok_or_else(|| {
                     Error::RenamingSourceAxisOutsideSignature(source_axis.clone())
                 })?;
             coefficients.push((target_axis, coefficient.clone()));
         }
-        BalanceLaw::new(target_kind, coefficients, *sentence.provenance())
-            .map_err(Error::BalanceLaw)
+        let translated = BalanceLaw::new(target_kind, coefficients, *form.provenance())
+            .map_err(Error::BalanceLaw)?;
+        Ok(GradedLaw::new(translated, sentence.grade()))
     }
 
     fn reduct(
@@ -574,9 +582,9 @@ impl Institution for ConservationInstitution {
     ) -> Result<bool, Self::Error> {
         Self::validate_model(signature, model)?;
         Self::validate_sentence(signature, sentence)?;
-        match check_trace(sentence, model.states()).map_err(Error::Trace)? {
-            TraceVerdict::Satisfied(_) => Ok(true),
-            TraceVerdict::Violated(_) => Ok(false),
+        match check_law(sentence, model.states()).map_err(Error::Trace)? {
+            LawVerdict::Satisfied(_) => Ok(true),
+            LawVerdict::Violated(_) => Ok(false),
         }
     }
 }

@@ -11,7 +11,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 [[package]]
 name = "conservation-core"
 version = "0.1.0"
-source = "git+https://github.com/ctoth/conservation.git?rev=9b336f742c282973965eb893c9c40399540be44b#9b336f742c282973965eb893c9c40399540be44b"
+source = "git+https://github.com/ctoth/conservation.git?rev=dd21f6b1fee852b62328dac8aaf7138e45551272#dd21f6b1fee852b62328dac8aaf7138e45551272"
 dependencies = [
  "num-rational",
  "num-traits",
@@ -20,7 +20,7 @@ dependencies = [
 [[package]]
 name = "conservation-linear"
 version = "0.1.0"
-source = "git+https://github.com/ctoth/conservation.git?rev=9b336f742c282973965eb893c9c40399540be44b#9b336f742c282973965eb893c9c40399540be44b"
+source = "git+https://github.com/ctoth/conservation.git?rev=dd21f6b1fee852b62328dac8aaf7138e45551272#dd21f6b1fee852b62328dac8aaf7138e45551272"
 dependencies = [
  "conservation-core",
  "num-bigint",
@@ -32,7 +32,7 @@ dependencies = [
 [[package]]
 name = "conservation-trace"
 version = "0.1.0"
-source = "git+https://github.com/ctoth/conservation.git?rev=9b336f742c282973965eb893c9c40399540be44b#9b336f742c282973965eb893c9c40399540be44b"
+source = "git+https://github.com/ctoth/conservation.git?rev=dd21f6b1fee852b62328dac8aaf7138e45551272#dd21f6b1fee852b62328dac8aaf7138e45551272"
 dependencies = [
  "conservation-core",
  "num-rational",

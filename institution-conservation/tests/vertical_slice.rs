@@ -1,4 +1,4 @@
-use conservation_core::{AxisId, BalanceLaw, KindId, Provenance};
+use conservation_core::{AxisId, BalanceLaw, GradedLaw, KindId, Provenance};
 use conservation_linear::{NullspaceSource, TransitionMatrix, derive_left_nullspace};
 use conservation_trace::TraceState;
 use institution::{Institution, laws};
@@ -55,7 +55,7 @@ fn derive_law(
 
 struct SharedCases {
     source: ConservationSignature,
-    law: BalanceLaw,
+    law: GradedLaw,
     ecological_renaming: AxisRenaming,
     ecological_model: TraceModel,
     economic_renaming: AxisRenaming,
@@ -68,13 +68,13 @@ fn shared_neutral_cases() -> SharedCases {
         ("neutral_right", "neutral_quantity"),
     ]);
     // One exact directed incidence edge gives the neutral law [1, 1].
-    let law = derive_law(
+    let law = GradedLaw::from(derive_law(
         "neutral_left",
         "neutral_right",
         "neutral_quantity",
         [vec![q(-1)], vec![q(1)]],
         NullspaceSource::Incidence,
-    );
+    ));
 
     let ecological_target =
         signature(&[("consumer_pool", "biomass"), ("producer_pool", "biomass")]);
@@ -134,7 +134,10 @@ fn one_neutral_source_law_gives_true_ecological_and_false_economic_squares() {
 
     assert_eq!(cases.ecological_renaming.source(), &cases.source);
     assert_eq!(cases.economic_renaming.source(), &cases.source);
-    assert_eq!(cases.law.provenance(), &Provenance::IncidenceNullspace);
+    assert_eq!(
+        cases.law.form().provenance(),
+        &Provenance::IncidenceNullspace
+    );
     let economic_source_law = cases.law.clone();
     assert_eq!(economic_source_law, cases.law);
 
@@ -144,10 +147,18 @@ fn one_neutral_source_law_gives_true_ecological_and_false_economic_squares() {
     let economic_law = institution
         .translate_sentence(&cases.economic_renaming, &economic_source_law)
         .unwrap();
-    assert_eq!(ecological_law.kind(), &kind("biomass"));
-    assert_eq!(economic_law.kind(), &kind("money"));
-    assert_eq!(ecological_law.provenance(), cases.law.provenance());
-    assert_eq!(economic_law.provenance(), cases.law.provenance());
+    assert_eq!(ecological_law.form().kind(), &kind("biomass"));
+    assert_eq!(economic_law.form().kind(), &kind("money"));
+    assert_eq!(ecological_law.grade(), cases.law.grade());
+    assert_eq!(economic_law.grade(), cases.law.grade());
+    assert_eq!(
+        ecological_law.form().provenance(),
+        cases.law.form().provenance()
+    );
+    assert_eq!(
+        economic_law.form().provenance(),
+        cases.law.form().provenance()
+    );
 
     let ecological_square = laws::check_satisfaction_square(
         &institution,
@@ -233,11 +244,11 @@ fn asymmetric_stoichiometric_law_exposes_translation_and_reduct_direction() {
     .unwrap();
 
     let translated = ConservationInstitution
-        .translate_sentence(&reversing, &law)
+        .translate_sentence(&reversing, &GradedLaw::from(law))
         .unwrap();
-    assert_eq!(translated.kind(), &kind("measure"));
-    assert_eq!(translated.coefficient(&axis("alpha")), &q(2));
-    assert_eq!(translated.coefficient(&axis("zeta")), &q(1));
+    assert_eq!(translated.form().kind(), &kind("measure"));
+    assert_eq!(translated.form().coefficient(&axis("alpha")), &q(2));
+    assert_eq!(translated.form().coefficient(&axis("zeta")), &q(1));
 
     let reduced = ConservationInstitution
         .reduct(&reversing, &target_model)
@@ -276,6 +287,8 @@ fn provenance_tags_do_not_change_satisfaction_semantics() {
 
     assert_eq!(derived.provenance(), &Provenance::StoichiometricNullspace);
     assert_eq!(declared.provenance(), &Provenance::Declared);
+    let derived = GradedLaw::from(derived);
+    let declared = GradedLaw::from(declared);
     assert_eq!(
         ConservationInstitution.satisfies(&source, &model, &derived),
         ConservationInstitution.satisfies(&source, &model, &declared)
@@ -435,12 +448,14 @@ fn malformed_memberships_error_instead_of_returning_false() {
         vec![state(&[("A", 1), ("B", 1)]), state(&[("A", 2), ("B", 0)])],
     )
     .unwrap();
-    let outside_law = BalanceLaw::new(
-        kind("quantity"),
-        [(axis("outside"), q(1))],
-        Provenance::Declared,
-    )
-    .unwrap();
+    let outside_law = GradedLaw::from(
+        BalanceLaw::new(
+            kind("quantity"),
+            [(axis("outside"), q(1))],
+            Provenance::Declared,
+        )
+        .unwrap(),
+    );
     assert_eq!(
         ConservationInstitution.satisfies(&source, &model, &outside_law),
         Err(Error::SentenceAxisOutsideSignature(axis("outside")))
@@ -452,13 +467,13 @@ fn malformed_memberships_error_instead_of_returning_false() {
         vec![state(&[("X", 1), ("Y", 1)]), state(&[("X", 2), ("Y", 0)])],
     )
     .unwrap();
-    let law = derive_law(
+    let law = GradedLaw::from(derive_law(
         "A",
         "B",
         "quantity",
         [vec![q(-1)], vec![q(1)]],
         NullspaceSource::Incidence,
-    );
+    ));
     assert_eq!(
         ConservationInstitution.satisfies(&source, &other_model, &law),
         Err(Error::ModelSignatureMismatch)
@@ -492,12 +507,14 @@ fn conservation_adapter_observes_signature_category_and_functor_laws() {
         [(kind("energy"), kind("currency"))],
     )
     .unwrap();
-    let law = BalanceLaw::new(
-        kind("quantity"),
-        [(axis("A"), q(1)), (axis("B"), q(1))],
-        Provenance::Declared,
-    )
-    .unwrap();
+    let law = GradedLaw::from(
+        BalanceLaw::new(
+            kind("quantity"),
+            [(axis("A"), q(1)), (axis("B"), q(1))],
+            Provenance::Declared,
+        )
+        .unwrap(),
+    );
     let model = TraceModel::new(
         target.clone(),
         vec![state(&[("U", 3), ("V", 7)]), state(&[("U", 4), ("V", 6)])],
