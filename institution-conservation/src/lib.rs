@@ -10,8 +10,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error as StdError;
 use std::fmt;
+use std::marker::PhantomData;
 
-use conservation_core::{AxisId, BalanceLaw, BalanceLawError, GradedLaw, KindId};
+use conservation_core::{AxisId, BalanceLaw, BalanceLawError, GradedLaw, Kind};
 use conservation_trace::{LawVerdict, TraceError, TraceState, TraceStateError, check_law};
 use institution::Institution;
 
@@ -19,14 +20,14 @@ pub mod stock_flow;
 
 /// A nonempty assignment of every axis to its quantitative kind.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConservationSignature {
-    axes: BTreeMap<AxisId, KindId>,
-    kinds: BTreeSet<KindId>,
+pub struct ConservationSignature<K> {
+    axes: BTreeMap<AxisId, K>,
+    kinds: BTreeSet<K>,
 }
 
-impl ConservationSignature {
+impl<K: Kind> ConservationSignature<K> {
     /// Validates and constructs a conservation signature.
-    pub fn new(axes: impl IntoIterator<Item = (AxisId, KindId)>) -> Result<Self, Error> {
+    pub fn new(axes: impl IntoIterator<Item = (AxisId, K)>) -> Result<Self, Error<K>> {
         let mut canonical = BTreeMap::new();
         for (axis, kind) in axes {
             if canonical.insert(axis.clone(), kind).is_some() {
@@ -36,7 +37,7 @@ impl ConservationSignature {
         if canonical.is_empty() {
             return Err(Error::EmptySignature);
         }
-        let kinds = canonical.values().cloned().collect();
+        let kinds = canonical.values().copied().collect();
         Ok(Self {
             axes: canonical,
             kinds,
@@ -44,18 +45,18 @@ impl ConservationSignature {
     }
 
     /// Returns the kind assigned to an axis.
-    pub fn kind(&self, axis: &AxisId) -> Option<&KindId> {
-        self.axes.get(axis)
+    pub fn kind(&self, axis: &AxisId) -> Option<K> {
+        self.axes.get(axis).copied()
     }
 
     /// Iterates through axes and kinds in deterministic axis order.
-    pub fn axes(&self) -> impl ExactSizeIterator<Item = (&AxisId, &KindId)> {
-        self.axes.iter()
+    pub fn axes(&self) -> impl ExactSizeIterator<Item = (&AxisId, K)> {
+        self.axes.iter().map(|(axis, kind)| (axis, *kind))
     }
 
     /// Iterates through distinct kinds in deterministic order.
-    pub fn kinds(&self) -> impl ExactSizeIterator<Item = &KindId> {
-        self.kinds.iter()
+    pub fn kinds(&self) -> impl ExactSizeIterator<Item = K> {
+        self.kinds.iter().copied()
     }
 
     /// Returns the number of axes.
@@ -73,24 +74,24 @@ impl ConservationSignature {
 
 /// A bijective, kind-preserving renaming with explicit source and target.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AxisRenaming {
-    source: ConservationSignature,
-    target: ConservationSignature,
+pub struct AxisRenaming<K> {
+    source: ConservationSignature<K>,
+    target: ConservationSignature<K>,
     forward: BTreeMap<AxisId, AxisId>,
     inverse: BTreeMap<AxisId, AxisId>,
-    kind_forward: BTreeMap<KindId, KindId>,
+    kind_forward: BTreeMap<K, K>,
 }
 
-impl AxisRenaming {
+impl<K: Kind> AxisRenaming<K> {
     /// Validates and constructs an axis renaming.
     pub fn new(
-        source: ConservationSignature,
-        target: ConservationSignature,
+        source: ConservationSignature<K>,
+        target: ConservationSignature<K>,
         mappings: impl IntoIterator<Item = (AxisId, AxisId)>,
-        kind_mappings: impl IntoIterator<Item = (KindId, KindId)>,
-    ) -> Result<Self, Error> {
-        let mut kind_forward = BTreeMap::<KindId, KindId>::new();
-        let mut kind_inverse = BTreeMap::<KindId, KindId>::new();
+        kind_mappings: impl IntoIterator<Item = (K, K)>,
+    ) -> Result<Self, Error<K>> {
+        let mut kind_forward = BTreeMap::<K, K>::new();
+        let mut kind_inverse = BTreeMap::<K, K>::new();
         for (source_kind, target_kind) in kind_mappings {
             if !source.kinds.contains(&source_kind) {
                 return Err(Error::KindMappingSourceOutsideSignature(source_kind));
@@ -98,20 +99,17 @@ impl AxisRenaming {
             if !target.kinds.contains(&target_kind) {
                 return Err(Error::KindMappingTargetOutsideSignature(target_kind));
             }
-            if let Some(existing_target) = kind_forward.get(&source_kind) {
-                if existing_target == &target_kind {
+            if let Some(&existing_target) = kind_forward.get(&source_kind) {
+                if existing_target == target_kind {
                     return Err(Error::DuplicateSourceKind(source_kind));
                 }
                 return Err(Error::ConflictingKindMapping {
                     source_kind,
-                    first_target: existing_target.clone(),
+                    first_target: existing_target,
                     second_target: target_kind,
                 });
             }
-            if kind_inverse
-                .insert(target_kind.clone(), source_kind.clone())
-                .is_some()
-            {
+            if kind_inverse.insert(target_kind, source_kind).is_some() {
                 return Err(Error::DuplicateTargetKind(target_kind));
             }
             kind_forward.insert(source_kind, target_kind);
@@ -140,14 +138,15 @@ impl AxisRenaming {
                 return Err(Error::RenamingTargetAxisOutsideSignature(target_axis));
             };
             let mapped_kind = kind_forward
-                .get(source_kind)
-                .ok_or_else(|| Error::KindMappingSourceOutsideSignature(source_kind.clone()))?;
+                .get(&source_kind)
+                .copied()
+                .ok_or(Error::KindMappingSourceOutsideSignature(source_kind))?;
             if mapped_kind != target_kind {
                 return Err(Error::AxisKindMappingMismatch {
                     source_axis,
                     target_axis,
-                    mapped_kind: mapped_kind.clone(),
-                    target_kind: target_kind.clone(),
+                    mapped_kind,
+                    target_kind,
                 });
             }
             if forward
@@ -184,27 +183,27 @@ impl AxisRenaming {
     }
 
     /// Returns the explicit source signature.
-    pub fn source(&self) -> &ConservationSignature {
+    pub fn source(&self) -> &ConservationSignature<K> {
         &self.source
     }
 
     /// Returns the explicit target signature.
-    pub fn target(&self) -> &ConservationSignature {
+    pub fn target(&self) -> &ConservationSignature<K> {
         &self.target
     }
 
-    fn identity(signature: &ConservationSignature) -> Result<Self, Error> {
+    fn identity(signature: &ConservationSignature<K>) -> Result<Self, Error<K>> {
         Self::new(
             signature.clone(),
             signature.clone(),
             signature
                 .axes()
                 .map(|(axis, _)| (axis.clone(), axis.clone())),
-            signature.kinds().map(|kind| (kind.clone(), kind.clone())),
+            signature.kinds().map(|kind| (kind, kind)),
         )
     }
 
-    fn compose(first: &Self, second: &Self) -> Result<Self, Error> {
+    fn compose(first: &Self, second: &Self) -> Result<Self, Error<K>> {
         if first.target != second.source {
             return Err(Error::NonComposableRenamings);
         }
@@ -227,7 +226,7 @@ impl AxisRenaming {
                     .kind_forward
                     .get(middle)
                     .expect("validated second kind renaming covers its source");
-                (source.clone(), target.clone())
+                (*source, *target)
             })
             .collect::<Vec<_>>();
         Self::new(
@@ -241,14 +240,17 @@ impl AxisRenaming {
 
 /// A validated model containing at least two exact trace states.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TraceModel {
-    signature: ConservationSignature,
+pub struct TraceModel<K> {
+    signature: ConservationSignature<K>,
     states: Vec<TraceState>,
 }
 
-impl TraceModel {
+impl<K: Kind> TraceModel<K> {
     /// Constructs a model whose every state has exactly the signature's axes.
-    pub fn new(signature: ConservationSignature, states: Vec<TraceState>) -> Result<Self, Error> {
+    pub fn new(
+        signature: ConservationSignature<K>,
+        states: Vec<TraceState>,
+    ) -> Result<Self, Error<K>> {
         if states.len() < 2 {
             return Err(Error::TraceTooShort {
                 states: states.len(),
@@ -267,7 +269,7 @@ impl TraceModel {
     }
 
     /// Returns the model's signature.
-    pub fn signature(&self) -> &ConservationSignature {
+    pub fn signature(&self) -> &ConservationSignature<K> {
         &self.signature
     }
 
@@ -280,7 +282,7 @@ impl TraceModel {
 /// Errors produced by validated bridge construction and institution operations.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum Error {
+pub enum Error<K> {
     /// A signature was empty.
     EmptySignature,
     /// A signature repeated an axis.
@@ -294,18 +296,18 @@ pub enum Error {
     /// A target axis had more than one preimage.
     DuplicateTargetAxis(AxisId),
     /// A kind-map source was outside the source signature.
-    KindMappingSourceOutsideSignature(KindId),
+    KindMappingSourceOutsideSignature(K),
     /// A kind-map target was outside the target signature.
-    KindMappingTargetOutsideSignature(KindId),
+    KindMappingTargetOutsideSignature(K),
     /// An identical source-kind mapping was supplied more than once.
-    DuplicateSourceKind(KindId),
+    DuplicateSourceKind(K),
     /// A target kind had more than one source-kind preimage.
-    DuplicateTargetKind(KindId),
+    DuplicateTargetKind(K),
     /// One source kind was assigned two different target kinds.
     ConflictingKindMapping {
-        source_kind: KindId,
-        first_target: KindId,
-        second_target: KindId,
+        source_kind: K,
+        first_target: K,
+        second_target: K,
     },
     /// Not every distinct source kind was mapped.
     IncompleteKindRenaming { mapped: usize, source_kinds: usize },
@@ -318,8 +320,8 @@ pub enum Error {
     AxisKindMappingMismatch {
         source_axis: AxisId,
         target_axis: AxisId,
-        mapped_kind: KindId,
-        target_kind: KindId,
+        mapped_kind: K,
+        target_kind: K,
     },
     /// Not every source axis was mapped.
     IncompleteRenaming { mapped: usize, source_axes: usize },
@@ -341,8 +343,8 @@ pub enum Error {
     /// A sentence's kind differed from the signature kind at an axis.
     SentenceKindMismatch {
         axis: AxisId,
-        sentence_kind: KindId,
-        signature_kind: KindId,
+        sentence_kind: K,
+        signature_kind: K,
     },
     /// Exact trace checking encountered malformed structure.
     Trace(TraceError),
@@ -352,7 +354,7 @@ pub enum Error {
     BalanceLaw(BalanceLawError),
 }
 
-impl fmt::Display for Error {
+impl<K: Kind> fmt::Display for Error<K> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptySignature => formatter.write_str("signature must contain at least one axis"),
@@ -460,17 +462,31 @@ impl fmt::Display for Error {
     }
 }
 
-impl StdError for Error {}
+impl<K: Kind> StdError for Error<K> {}
 
-/// The executable institution of exact balance laws and finite traces.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ConservationInstitution;
+/// The executable institution of exact balance laws and finite traces over kinds `K`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ConservationInstitution<K>(PhantomData<fn() -> K>);
 
-impl ConservationInstitution {
+impl<K> ConservationInstitution<K> {
+    /// The institution over kinds `K`.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<K> Default for ConservationInstitution<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K: Kind> ConservationInstitution<K> {
     fn validate_sentence(
-        signature: &ConservationSignature,
-        sentence: &GradedLaw,
-    ) -> Result<(), Error> {
+        signature: &ConservationSignature<K>,
+        sentence: &GradedLaw<K>,
+    ) -> Result<(), Error<K>> {
         let form = sentence.form();
         for (axis, _) in form.coefficients() {
             let Some(signature_kind) = signature.kind(axis) else {
@@ -479,15 +495,18 @@ impl ConservationInstitution {
             if form.kind() != signature_kind {
                 return Err(Error::SentenceKindMismatch {
                     axis: axis.clone(),
-                    sentence_kind: form.kind().clone(),
-                    signature_kind: signature_kind.clone(),
+                    sentence_kind: form.kind(),
+                    signature_kind,
                 });
             }
         }
         Ok(())
     }
 
-    fn validate_model(signature: &ConservationSignature, model: &TraceModel) -> Result<(), Error> {
+    fn validate_model(
+        signature: &ConservationSignature<K>,
+        model: &TraceModel<K>,
+    ) -> Result<(), Error<K>> {
         if model.signature() != signature {
             return Err(Error::ModelSignatureMismatch);
         }
@@ -495,12 +514,12 @@ impl ConservationInstitution {
     }
 }
 
-impl Institution for ConservationInstitution {
-    type Signature = ConservationSignature;
-    type SignatureMorphism = AxisRenaming;
-    type Sentence = GradedLaw;
-    type Model = TraceModel;
-    type Error = Error;
+impl<K: Kind> Institution for ConservationInstitution<K> {
+    type Signature = ConservationSignature<K>;
+    type SignatureMorphism = AxisRenaming<K>;
+    type Sentence = GradedLaw<K>;
+    type Model = TraceModel<K>;
+    type Error = Error<K>;
 
     fn source<'a>(&self, morphism: &'a Self::SignatureMorphism) -> &'a Self::Signature {
         morphism.source()
@@ -534,9 +553,9 @@ impl Institution for ConservationInstitution {
         let form = sentence.form();
         let target_kind = morphism
             .kind_forward
-            .get(form.kind())
-            .cloned()
-            .ok_or_else(|| Error::KindMappingSourceOutsideSignature(form.kind().clone()))?;
+            .get(&form.kind())
+            .copied()
+            .ok_or(Error::KindMappingSourceOutsideSignature(form.kind()))?;
         let mut coefficients = Vec::new();
         for (source_axis, coefficient) in form.coefficients() {
             let target_axis =

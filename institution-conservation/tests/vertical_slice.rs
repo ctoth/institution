@@ -1,26 +1,23 @@
-use conservation_core::{AxisId, BalanceLaw, GradedLaw, KindId, Provenance};
+mod support;
+
+use conservation_core::{AxisId, BalanceLaw, GradedLaw, Provenance};
 use conservation_linear::{NullspaceSource, TransitionMatrix, derive_left_nullspace};
 use conservation_trace::TraceState;
 use institution::{Institution, laws};
-use institution_conservation::{
-    AxisRenaming, ConservationInstitution, ConservationSignature, Error, TraceModel,
-};
+use institution_conservation::{AxisRenaming, ConservationSignature, Error, TraceModel};
 use num_bigint::BigInt;
 use num_rational::BigRational;
+use support::{CONSERVATION, FixtureKind, kind};
 
 fn axis(value: &str) -> AxisId {
     AxisId::new(value).unwrap()
-}
-
-fn kind(value: &str) -> KindId {
-    KindId::new(value).unwrap()
 }
 
 fn q(value: i64) -> BigRational {
     BigRational::from_integer(BigInt::from(value))
 }
 
-fn signature(entries: &[(&str, &str)]) -> ConservationSignature {
+fn signature(entries: &[(&str, &str)]) -> ConservationSignature<FixtureKind> {
     ConservationSignature::new(
         entries
             .iter()
@@ -44,7 +41,7 @@ fn derive_law(
     kind_name: &str,
     rows: [Vec<BigRational>; 2],
     source: NullspaceSource,
-) -> BalanceLaw {
+) -> BalanceLaw<FixtureKind> {
     let matrix = TransitionMatrix::new([axis(left), axis(right)], rows.to_vec()).unwrap();
     derive_left_nullspace(&matrix, kind(kind_name), source)
         .unwrap()
@@ -54,12 +51,12 @@ fn derive_law(
 }
 
 struct SharedCases {
-    source: ConservationSignature,
-    law: GradedLaw,
-    ecological_renaming: AxisRenaming,
-    ecological_model: TraceModel,
-    economic_renaming: AxisRenaming,
-    economic_model: TraceModel,
+    source: ConservationSignature<FixtureKind>,
+    law: GradedLaw<FixtureKind>,
+    ecological_renaming: AxisRenaming<FixtureKind>,
+    ecological_model: TraceModel<FixtureKind>,
+    economic_renaming: AxisRenaming<FixtureKind>,
+    economic_model: TraceModel<FixtureKind>,
 }
 
 fn shared_neutral_cases() -> SharedCases {
@@ -130,7 +127,7 @@ fn shared_neutral_cases() -> SharedCases {
 #[test]
 fn one_neutral_source_law_gives_true_ecological_and_false_economic_squares() {
     let cases = shared_neutral_cases();
-    let institution = ConservationInstitution;
+    let institution = CONSERVATION;
 
     assert_eq!(cases.ecological_renaming.source(), &cases.source);
     assert_eq!(cases.economic_renaming.source(), &cases.source);
@@ -147,8 +144,8 @@ fn one_neutral_source_law_gives_true_ecological_and_false_economic_squares() {
     let economic_law = institution
         .translate_sentence(&cases.economic_renaming, &economic_source_law)
         .unwrap();
-    assert_eq!(ecological_law.form().kind(), &kind("biomass"));
-    assert_eq!(economic_law.form().kind(), &kind("money"));
+    assert_eq!(ecological_law.form().kind(), kind("biomass"));
+    assert_eq!(economic_law.form().kind(), kind("money"));
     assert_eq!(ecological_law.grade(), cases.law.grade());
     assert_eq!(economic_law.grade(), cases.law.grade());
     assert_eq!(
@@ -243,16 +240,14 @@ fn asymmetric_stoichiometric_law_exposes_translation_and_reduct_direction() {
     )
     .unwrap();
 
-    let translated = ConservationInstitution
+    let translated = CONSERVATION
         .translate_sentence(&reversing, &GradedLaw::from(law))
         .unwrap();
-    assert_eq!(translated.form().kind(), &kind("measure"));
+    assert_eq!(translated.form().kind(), kind("measure"));
     assert_eq!(translated.form().coefficient(&axis("alpha")), &q(2));
     assert_eq!(translated.form().coefficient(&axis("zeta")), &q(1));
 
-    let reduced = ConservationInstitution
-        .reduct(&reversing, &target_model)
-        .unwrap();
+    let reduced = CONSERVATION.reduct(&reversing, &target_model).unwrap();
     assert_eq!(reduced.signature(), &source);
     assert_eq!(reduced.states()[0].value(&axis("left")), Some(&q(10)));
     assert_eq!(reduced.states()[0].value(&axis("right")), Some(&q(20)));
@@ -269,7 +264,7 @@ fn provenance_tags_do_not_change_satisfaction_semantics() {
         NullspaceSource::Stoichiometric,
     );
     let declared = BalanceLaw::new(
-        derived.kind().clone(),
+        derived.kind(),
         derived
             .coefficients()
             .map(|(axis, coefficient)| (axis.clone(), coefficient.clone())),
@@ -290,18 +285,18 @@ fn provenance_tags_do_not_change_satisfaction_semantics() {
     let derived = GradedLaw::from(derived);
     let declared = GradedLaw::from(declared);
     assert_eq!(
-        ConservationInstitution.satisfies(&source, &model, &derived),
-        ConservationInstitution.satisfies(&source, &model, &declared)
+        CONSERVATION.satisfies(&source, &model, &derived),
+        CONSERVATION.satisfies(&source, &model, &declared)
     );
-    assert_eq!(
-        ConservationInstitution.satisfies(&source, &model, &derived),
-        Ok(true)
-    );
+    assert_eq!(CONSERVATION.satisfies(&source, &model, &derived), Ok(true));
 }
 
 #[test]
 fn signatures_axis_maps_and_models_retain_their_validation() {
-    assert_eq!(ConservationSignature::new([]), Err(Error::EmptySignature));
+    assert_eq!(
+        ConservationSignature::<FixtureKind>::new([]),
+        Err(Error::EmptySignature)
+    );
     assert_eq!(
         ConservationSignature::new([(axis("A"), kind("quantity")), (axis("A"), kind("quantity")),]),
         Err(Error::DuplicateSignatureAxis(axis("A")))
@@ -315,7 +310,7 @@ fn signatures_axis_maps_and_models_retain_their_validation() {
             source.clone(),
             target.clone(),
             [(axis("A"), axis("X"))],
-            kind_map.clone(),
+            kind_map,
         ),
         Err(Error::IncompleteRenaming {
             mapped: 1,
@@ -457,7 +452,7 @@ fn malformed_memberships_error_instead_of_returning_false() {
         .unwrap(),
     );
     assert_eq!(
-        ConservationInstitution.satisfies(&source, &model, &outside_law),
+        CONSERVATION.satisfies(&source, &model, &outside_law),
         Err(Error::SentenceAxisOutsideSignature(axis("outside")))
     );
 
@@ -475,7 +470,7 @@ fn malformed_memberships_error_instead_of_returning_false() {
         NullspaceSource::Incidence,
     ));
     assert_eq!(
-        ConservationInstitution.satisfies(&source, &other_model, &law),
+        CONSERVATION.satisfies(&source, &other_model, &law),
         Err(Error::ModelSignatureMismatch)
     );
 }
@@ -520,7 +515,7 @@ fn conservation_adapter_observes_signature_category_and_functor_laws() {
         vec![state(&[("U", 3), ("V", 7)]), state(&[("U", 4), ("V", 6)])],
     )
     .unwrap();
-    let institution = ConservationInstitution;
+    let institution = CONSERVATION;
 
     assert!(laws::check_signature_identity(&institution, &first).unwrap());
     assert!(laws::check_signature_associativity(&institution, &first, &second, &third,).unwrap());
