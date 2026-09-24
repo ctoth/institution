@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use conservation_core::{AxisId, BalanceLaw, Grade, GradedLaw, KindId, Provenance};
+use conservation_core::{AxisId, BalanceLaw, Grade, GradedLaw, Provenance};
 use conservation_dynamics::{FlowSpec, FlowTopology, ProcessId, StockDefinition, StockId};
 use conservation_stock_flow::{
     BoundaryCorrespondence, BoundaryId, ChannelId, ExactAmounts, FlowId, GradedStateLaw,
@@ -10,11 +10,19 @@ use conservation_stock_flow::{
     StockFlowCarrier, Symbol, TransitionEquation, TransitionRecord, TransitionRecordData,
     TransitionTrace, certify_nullspace,
 };
+use institution_conservation::ConservationInstitution;
 use institution_conservation::stock_flow::{
-    StockFlowModel, StockFlowRenaming, StockFlowSentence, StockFlowSignature,
+    StockFlowInstitution, StockFlowModel, StockFlowRenaming, StockFlowSentence, StockFlowSignature,
 };
 use num_bigint::BigInt;
 use num_rational::BigRational;
+
+pub mod kinds;
+
+pub use kinds::{FixtureKind, kind};
+
+pub const CONSERVATION: ConservationInstitution<FixtureKind> = ConservationInstitution::new();
+pub const STOCK_FLOW: StockFlowInstitution<FixtureKind> = StockFlowInstitution::new();
 
 #[derive(Clone, Copy)]
 pub struct Names {
@@ -100,10 +108,6 @@ pub fn axis(value: &str) -> AxisId {
     AxisId::new(value).unwrap()
 }
 
-pub fn kind(value: &str) -> KindId {
-    KindId::new(value).unwrap()
-}
-
 pub fn flow(value: &str) -> FlowId {
     FlowId::new(value).unwrap()
 }
@@ -121,12 +125,12 @@ pub fn sentence(value: &str) -> SentenceId {
 }
 
 pub fn amounts<I: Symbol>(
-    values: impl IntoIterator<Item = (I, KindId, BigRational)>,
-) -> ExactAmounts<I> {
+    values: impl IntoIterator<Item = (I, FixtureKind, BigRational)>,
+) -> ExactAmounts<I, FixtureKind> {
     ExactAmounts::new(values).unwrap()
 }
 
-pub fn signature(names: Names) -> StockFlowSignature {
+pub fn signature(names: Names) -> StockFlowSignature<FixtureKind> {
     let quantity = kind(names.kind);
     let left = StockId::new(names.left_stock).unwrap();
     let right = StockId::new(names.right_stock).unwrap();
@@ -134,33 +138,34 @@ pub fn signature(names: Names) -> StockFlowSignature {
         [
             StockDefinition {
                 id: left.clone(),
-                kind: quantity.clone(),
+                kind: quantity,
             },
             StockDefinition {
                 id: right.clone(),
-                kind: quantity.clone(),
+                kind: quantity,
             },
         ],
         [
             FlowSpec {
                 process: ProcessId::new("internal-process").unwrap(),
-                kind: quantity.clone(),
+                kind: quantity,
                 source: Some(left.clone()),
                 target: Some(right.clone()),
             },
             FlowSpec {
                 process: ProcessId::new("input-process").unwrap(),
-                kind: quantity.clone(),
+                kind: quantity,
                 source: None,
                 target: Some(left.clone()),
             },
             FlowSpec {
                 process: ProcessId::new("output-process").unwrap(),
-                kind: quantity.clone(),
+                kind: quantity,
                 source: Some(right.clone()),
                 target: None,
             },
         ],
+        [],
     )
     .unwrap();
     let carrier = StockFlowCarrier::new(
@@ -184,7 +189,7 @@ pub fn signature(names: Names) -> StockFlowSignature {
             LedgerDefinition {
                 id: ledger(names.input_ledger),
                 axis: axis(names.input_ledger_axis),
-                kind: quantity.clone(),
+                kind: quantity,
                 boundaries: vec![boundary(names.input)],
             },
             LedgerDefinition {
@@ -201,10 +206,10 @@ pub fn signature(names: Names) -> StockFlowSignature {
 
 pub fn renaming(
     source_names: Names,
-    source: StockFlowSignature,
+    source: StockFlowSignature<FixtureKind>,
     target_names: Names,
-    target: StockFlowSignature,
-) -> StockFlowRenaming {
+    target: StockFlowSignature<FixtureKind>,
+) -> StockFlowRenaming<FixtureKind> {
     StockFlowRenaming::new(
         source,
         target,
@@ -242,7 +247,7 @@ pub fn renaming(
 
 #[allow(clippy::too_many_arguments)]
 pub fn model_with_values(
-    signature: &StockFlowSignature,
+    signature: &StockFlowSignature<FixtureKind>,
     names: Names,
     left_before: i64,
     right_before: i64,
@@ -251,7 +256,7 @@ pub fn model_with_values(
     output: i64,
     equation_holds: bool,
     ledgers_hold: bool,
-) -> StockFlowModel {
+) -> StockFlowModel<FixtureKind> {
     let quantity = kind(names.kind);
     let left_after = if equation_holds {
         left_before - internal + input
@@ -268,29 +273,29 @@ pub fn model_with_values(
         signature.carrier(),
         TransitionRecordData {
             before: amounts([
-                (axis(names.left_axis), quantity.clone(), q(left_before)),
-                (axis(names.right_axis), quantity.clone(), q(right_before)),
+                (axis(names.left_axis), quantity, q(left_before)),
+                (axis(names.right_axis), quantity, q(right_before)),
             ]),
             after: amounts([
-                (axis(names.left_axis), quantity.clone(), q(left_after)),
-                (axis(names.right_axis), quantity.clone(), q(right_after)),
+                (axis(names.left_axis), quantity, q(left_after)),
+                (axis(names.right_axis), quantity, q(right_after)),
             ]),
-            requested_internal: amounts([(flow(names.flow), quantity.clone(), q(internal))]),
-            settled_internal: amounts([(flow(names.flow), quantity.clone(), q(internal))]),
+            requested_internal: amounts([(flow(names.flow), quantity, q(internal))]),
+            settled_internal: amounts([(flow(names.flow), quantity, q(internal))]),
             requested_boundary: amounts([
-                (boundary(names.input), quantity.clone(), q(input)),
-                (boundary(names.output), quantity.clone(), q(output)),
+                (boundary(names.input), quantity, q(input)),
+                (boundary(names.output), quantity, q(output)),
             ]),
             settled_boundary: amounts([
-                (boundary(names.input), quantity.clone(), q(input)),
-                (boundary(names.output), quantity.clone(), q(output)),
+                (boundary(names.input), quantity, q(input)),
+                (boundary(names.output), quantity, q(output)),
             ]),
             ledger_before: amounts([
-                (ledger(names.input_ledger), quantity.clone(), q(10)),
-                (ledger(names.output_ledger), quantity.clone(), q(-5)),
+                (ledger(names.input_ledger), quantity, q(10)),
+                (ledger(names.output_ledger), quantity, q(-5)),
             ]),
             ledger_after: amounts([
-                (ledger(names.input_ledger), quantity.clone(), q(input_after)),
+                (ledger(names.input_ledger), quantity, q(input_after)),
                 (ledger(names.output_ledger), quantity, q(-5 + output)),
             ]),
         },
@@ -300,15 +305,21 @@ pub fn model_with_values(
     StockFlowModel::new(signature.clone(), trace).unwrap()
 }
 
-pub fn valid_model(signature: &StockFlowSignature, names: Names) -> StockFlowModel {
+pub fn valid_model(
+    signature: &StockFlowSignature<FixtureKind>,
+    names: Names,
+) -> StockFlowModel<FixtureKind> {
     model_with_values(signature, names, -2, 12, 3, 2, 1, true, true)
 }
 
-pub fn sentences(signature: &StockFlowSignature, names: Names) -> Vec<StockFlowSentence> {
+pub fn sentences(
+    signature: &StockFlowSignature<FixtureKind>,
+    names: Names,
+) -> Vec<StockFlowSentence<FixtureKind>> {
     let quantity = kind(names.kind);
     let graded = GradedLaw::new(
         BalanceLaw::new(
-            quantity.clone(),
+            quantity,
             [
                 (axis(names.left_axis), q(1)),
                 (axis(names.right_axis), q(1)),
@@ -322,7 +333,7 @@ pub fn sentences(signature: &StockFlowSignature, names: Names) -> Vec<StockFlowS
     );
     let certificate = certify_nullspace(
         signature.carrier(),
-        quantity.clone(),
+        quantity,
         [
             (axis(names.left_axis), q(1)),
             (axis(names.right_axis), q(1)),

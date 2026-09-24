@@ -7,9 +7,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error as StdError;
 use std::fmt;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
-use conservation_core::{AxisId, BalanceLaw, GradedLaw, KindId};
+use conservation_core::{AxisId, BalanceLaw, GradedLaw, Kind};
 use conservation_stock_flow::{
     BoundaryCorrespondence, BoundaryId, BoundaryVerdict, CarrierIdentity, ExactAmounts,
     FlowConstraintVerdict, FlowId, GradedStateLaw, LedgerId, LinearFlowConstraint, OpenBalance,
@@ -23,40 +24,40 @@ use institution::Institution;
 
 /// A completely validated stock-flow signature backed by one exact carrier.
 #[derive(Clone, Debug)]
-pub struct StockFlowSignature {
-    carrier: Arc<StockFlowCarrier>,
+pub struct StockFlowSignature<K> {
+    carrier: Arc<StockFlowCarrier<K>>,
 }
 
-impl StockFlowSignature {
+impl<K: Kind> StockFlowSignature<K> {
     /// Wraps an immutable carrier whose constructor has validated its complete
     /// named matrix and ledger structure.
     #[must_use]
-    pub fn new(carrier: Arc<StockFlowCarrier>) -> Self {
+    pub fn new(carrier: Arc<StockFlowCarrier<K>>) -> Self {
         Self { carrier }
     }
 
     /// Exact carrier interpreted by models over this signature.
     #[must_use]
-    pub fn carrier(&self) -> &Arc<StockFlowCarrier> {
+    pub fn carrier(&self) -> &Arc<StockFlowCarrier<K>> {
         &self.carrier
     }
 
     /// Canonical structural identity used for signature equality.
     #[must_use]
-    pub fn identity(&self) -> &CarrierIdentity {
+    pub fn identity(&self) -> &CarrierIdentity<K> {
         self.carrier.identity()
     }
 }
 
-impl PartialEq for StockFlowSignature {
+impl<K: Kind> PartialEq for StockFlowSignature<K> {
     fn eq(&self, other: &Self) -> bool {
         self.identity() == other.identity()
     }
 }
 
-impl Eq for StockFlowSignature {}
+impl<K: Kind> Eq for StockFlowSignature<K> {}
 
-impl StockFlowSignature {
+impl<K: Kind> StockFlowSignature<K> {
     fn stock_axes(&self) -> BTreeSet<AxisId> {
         self.identity().internal_effects().axes().cloned().collect()
     }
@@ -73,21 +74,21 @@ impl StockFlowSignature {
             .collect()
     }
 
-    fn kinds(&self) -> BTreeSet<KindId> {
+    fn kinds(&self) -> BTreeSet<K> {
         self.identity()
             .internal_effects()
             .axes()
-            .filter_map(|axis| self.identity().internal_effects().axis_kind(axis).cloned())
+            .filter_map(|axis| self.identity().internal_effects().axis_kind(axis))
             .chain(
                 self.identity()
                     .ledgers()
                     .values()
-                    .map(|ledger| ledger.kind().clone()),
+                    .map(|ledger| ledger.kind()),
             )
             .collect()
     }
 
-    fn axis_kind(&self, axis: &AxisId) -> Option<&KindId> {
+    fn axis_kind(&self, axis: &AxisId) -> Option<K> {
         self.identity()
             .internal_effects()
             .axis_kind(axis)
@@ -111,12 +112,12 @@ impl<T> Bijection<T>
 where
     T: Clone + Ord + fmt::Debug,
 {
-    fn new(
+    fn new<K>(
         class: &str,
         source: &BTreeSet<T>,
         target: &BTreeSet<T>,
         pairs: impl IntoIterator<Item = (T, T)>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Error<K>> {
         let mut forward = BTreeMap::new();
         let mut inverse = BTreeMap::new();
         for (from, to) in pairs {
@@ -190,29 +191,45 @@ where
 }
 
 /// A structure-preserving, invertible renaming of every named carrier symbol.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StockFlowRenaming {
-    source: StockFlowSignature,
-    target: StockFlowSignature,
-    kinds: Bijection<KindId>,
+#[derive(Clone, Debug)]
+pub struct StockFlowRenaming<K> {
+    source: StockFlowSignature<K>,
+    target: StockFlowSignature<K>,
+    kinds: Bijection<K>,
     axes: Bijection<AxisId>,
     flows: Bijection<FlowId>,
     boundaries: Bijection<BoundaryId>,
     ledgers: Bijection<LedgerId>,
 }
 
-impl StockFlowRenaming {
+// Written out rather than derived: a derive would bound `K: PartialEq`, but
+// signature equality is carrier-identity equality, which needs `K: Kind`.
+impl<K: Kind> PartialEq for StockFlowRenaming<K> {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source
+            && self.target == other.target
+            && self.kinds == other.kinds
+            && self.axes == other.axes
+            && self.flows == other.flows
+            && self.boundaries == other.boundaries
+            && self.ledgers == other.ledgers
+    }
+}
+
+impl<K: Kind> Eq for StockFlowRenaming<K> {}
+
+impl<K: Kind> StockFlowRenaming<K> {
     /// Validates a total structural isomorphism between two stock-flow carriers.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        source: StockFlowSignature,
-        target: StockFlowSignature,
-        kinds: impl IntoIterator<Item = (KindId, KindId)>,
+        source: StockFlowSignature<K>,
+        target: StockFlowSignature<K>,
+        kinds: impl IntoIterator<Item = (K, K)>,
         axes: impl IntoIterator<Item = (AxisId, AxisId)>,
         flows: impl IntoIterator<Item = (FlowId, FlowId)>,
         boundaries: impl IntoIterator<Item = (BoundaryId, BoundaryId)>,
         ledgers: impl IntoIterator<Item = (LedgerId, LedgerId)>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Error<K>> {
         let value = Self {
             kinds: Bijection::new("kind", &source.kinds(), &target.kinds(), kinds)?,
             axes: Bijection::new("axis", &source.axes(), &target.axes(), axes)?,
@@ -263,7 +280,7 @@ impl StockFlowRenaming {
 
     /// Identity structural renaming.
     #[must_use]
-    pub fn identity(signature: &StockFlowSignature) -> Self {
+    pub fn identity(signature: &StockFlowSignature<K>) -> Self {
         Self {
             source: signature.clone(),
             target: signature.clone(),
@@ -291,20 +308,20 @@ impl StockFlowRenaming {
 
     /// Domain signature.
     #[must_use]
-    pub fn source(&self) -> &StockFlowSignature {
+    pub fn source(&self) -> &StockFlowSignature<K> {
         &self.source
     }
 
     /// Codomain signature.
     #[must_use]
-    pub fn target(&self) -> &StockFlowSignature {
+    pub fn target(&self) -> &StockFlowSignature<K> {
         &self.target
     }
 
     /// Covariant image of a source quantity kind.
     #[must_use]
-    pub fn map_kind(&self, value: &KindId) -> Option<&KindId> {
-        self.kinds.forward.get(value)
+    pub fn map_kind(&self, value: K) -> Option<K> {
+        self.kinds.forward.get(&value).copied()
     }
 
     /// Covariant image of a source stock or ledger axis.
@@ -332,7 +349,7 @@ impl StockFlowRenaming {
     }
 
     /// Composes two compatible renamings.
-    pub fn compose(first: &Self, second: &Self) -> Result<Self, Error> {
+    pub fn compose(first: &Self, second: &Self) -> Result<Self, Error<K>> {
         if first.target != second.source {
             return Err(Error::NotComposable);
         }
@@ -347,12 +364,12 @@ impl StockFlowRenaming {
         })
     }
 
-    fn validate_structure(&self) -> Result<(), Error> {
+    fn validate_structure(&self) -> Result<(), Error<K>> {
         for source_axis in self.source.axes() {
             let target_axis = &self.axes.forward[&source_axis];
             let source_kind = self.source.axis_kind(&source_axis).expect("known axis");
             let target_kind = self.target.axis_kind(target_axis).expect("known axis");
-            if self.kinds.forward[source_kind] != *target_kind {
+            if self.kinds.forward[&source_kind] != target_kind {
                 return Err(Error::InvalidMorphism(format!(
                     "axis kind is not preserved for {source_axis}"
                 )));
@@ -380,7 +397,7 @@ impl StockFlowRenaming {
             let source_ledger = &self.source.identity().ledgers()[source_id];
             let target_ledger = &self.target.identity().ledgers()[target_id];
             if self.axes.forward.get(source_ledger.axis()) != Some(target_ledger.axis())
-                || self.kinds.forward.get(source_ledger.kind()) != Some(target_ledger.kind())
+                || self.kinds.forward.get(&source_ledger.kind()) != Some(&target_ledger.kind())
             {
                 return Err(Error::InvalidMorphism(format!(
                     "ledger axis or kind is not preserved for {source_id}"
@@ -400,14 +417,14 @@ impl StockFlowRenaming {
         Ok(())
     }
 
-    fn validate_matrix(&self, boundary: bool) -> Result<(), Error> {
+    fn validate_matrix(&self, boundary: bool) -> Result<(), Error<K>> {
         if boundary {
             let source = self.source.identity().boundary_effects();
             let target = self.target.identity().boundary_effects();
             for source_column in source.columns() {
                 let target_column = &self.boundaries.forward[source_column];
-                if self.kinds.forward[source.column_kind(source_column).expect("known column")]
-                    != *target.column_kind(target_column).expect("known column")
+                if self.kinds.forward[&source.column_kind(source_column).expect("known column")]
+                    != target.column_kind(target_column).expect("known column")
                 {
                     return Err(Error::InvalidMorphism(format!(
                         "boundary kind is not preserved for {source_column}"
@@ -429,8 +446,8 @@ impl StockFlowRenaming {
             let target = self.target.identity().internal_effects();
             for source_column in source.columns() {
                 let target_column = &self.flows.forward[source_column];
-                if self.kinds.forward[source.column_kind(source_column).expect("known column")]
-                    != *target.column_kind(target_column).expect("known column")
+                if self.kinds.forward[&source.column_kind(source_column).expect("known column")]
+                    != target.column_kind(target_column).expect("known column")
                 {
                     return Err(Error::InvalidMorphism(format!(
                         "flow kind is not preserved for {source_column}"
@@ -454,29 +471,32 @@ impl StockFlowRenaming {
 
 /// A named exact stock-flow sentence family.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum StockFlowSentence {
+pub enum StockFlowSentence<K> {
     /// Per-transition stock update equation.
     Transition(TransitionEquation),
     /// Exact linear equality over settled internal flows.
-    LinearFlow(LinearFlowConstraint),
+    LinearFlow(LinearFlowConstraint<K>),
     /// Exact cumulative-ledger equality over mapped boundary ports.
     Boundary(BoundaryCorrespondence),
     /// Existing graded state law over projected stocks and ledgers.
-    Graded(GradedStateLaw),
+    Graded(GradedStateLaw<K>),
     /// Direct open-system balance authorized by a sealed nullspace certificate.
-    OpenBalance(OpenBalance),
+    OpenBalance(OpenBalance<K>),
 }
 
 /// A validated exact transition trace over one stock-flow signature.
 #[derive(Clone, Debug)]
-pub struct StockFlowModel {
-    signature: StockFlowSignature,
-    trace: TransitionTrace,
+pub struct StockFlowModel<K> {
+    signature: StockFlowSignature<K>,
+    trace: TransitionTrace<K>,
 }
 
-impl StockFlowModel {
+impl<K: Kind> StockFlowModel<K> {
     /// Wraps a trace only when its carrier is the declared signature.
-    pub fn new(signature: StockFlowSignature, trace: TransitionTrace) -> Result<Self, Error> {
+    pub fn new(
+        signature: StockFlowSignature<K>,
+        trace: TransitionTrace<K>,
+    ) -> Result<Self, Error<K>> {
         if trace.carrier().identity() != signature.identity() {
             return Err(Error::ModelSignatureMismatch);
         }
@@ -485,41 +505,41 @@ impl StockFlowModel {
 
     /// Model signature.
     #[must_use]
-    pub fn signature(&self) -> &StockFlowSignature {
+    pub fn signature(&self) -> &StockFlowSignature<K> {
         &self.signature
     }
 
     /// Exact accepted transition trace.
     #[must_use]
-    pub fn trace(&self) -> &TransitionTrace {
+    pub fn trace(&self) -> &TransitionTrace<K> {
         &self.trace
     }
 }
 
-impl PartialEq for StockFlowModel {
+impl<K: Kind> PartialEq for StockFlowModel<K> {
     fn eq(&self, other: &Self) -> bool {
         self.signature == other.signature && self.trace.records() == other.trace.records()
     }
 }
 
-impl Eq for StockFlowModel {}
+impl<K: Kind> Eq for StockFlowModel<K> {}
 
 /// Typed semantic evidence retained by the adapter's richer evaluation API.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum StockFlowVerdict {
+pub enum StockFlowVerdict<K> {
     /// Transition-equation evidence.
-    Transition(TransitionVerdict),
+    Transition(TransitionVerdict<K>),
     /// Linear-flow evidence.
     LinearFlow(FlowConstraintVerdict),
     /// Boundary-ledger evidence.
     Boundary(BoundaryVerdict),
     /// Existing graded-law evidence.
-    Graded(LawVerdict),
+    Graded(LawVerdict<K>),
     /// Certified direct open-balance evidence.
-    OpenBalance(OpenBalanceVerdict),
+    OpenBalance(OpenBalanceVerdict<K>),
 }
 
-impl StockFlowVerdict {
+impl<K: Kind> StockFlowVerdict<K> {
     /// Whether the typed verdict carries positive evidence.
     #[must_use]
     pub fn is_satisfied(&self) -> bool {
@@ -536,7 +556,7 @@ impl StockFlowVerdict {
 /// Structural or semantic adapter failure.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum Error {
+pub enum Error<K> {
     /// A proposed symbol map does not preserve complete carrier structure.
     InvalidMorphism(String),
     /// The two morphisms do not share their middle signature.
@@ -544,10 +564,10 @@ pub enum Error {
     /// A model trace belongs to a different carrier identity.
     ModelSignatureMismatch,
     /// Sentence, trace, or certificate validation failed in the carrier.
-    Carrier(StockFlowError),
+    Carrier(StockFlowError<K>),
 }
 
-impl fmt::Display for Error {
+impl<K: Kind> fmt::Display for Error<K> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidMorphism(message) => {
@@ -562,24 +582,38 @@ impl fmt::Display for Error {
     }
 }
 
-impl StdError for Error {}
+impl<K: Kind> StdError for Error<K> {}
 
-impl From<StockFlowError> for Error {
-    fn from(error: StockFlowError) -> Self {
+impl<K: Kind> From<StockFlowError<K>> for Error<K> {
+    fn from(error: StockFlowError<K>) -> Self {
         Self::Carrier(error)
     }
 }
 
-/// Institution of exact stock-flow carriers, structural renamings, and traces.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct StockFlowInstitution;
+/// Institution of exact stock-flow carriers, structural renamings, and traces over kinds `K`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StockFlowInstitution<K>(PhantomData<fn() -> K>);
 
-impl StockFlowInstitution {
+impl<K> StockFlowInstitution<K> {
+    /// The institution over kinds `K`.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<K> Default for StockFlowInstitution<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K: Kind> StockFlowInstitution<K> {
     /// Evaluates a sentence while retaining its family-specific evidence.
     pub fn evaluate(
-        sentence: &StockFlowSentence,
-        model: &StockFlowModel,
-    ) -> Result<StockFlowVerdict, Error> {
+        sentence: &StockFlowSentence<K>,
+        model: &StockFlowModel<K>,
+    ) -> Result<StockFlowVerdict<K>, Error<K>> {
         Ok(match sentence {
             StockFlowSentence::Transition(sentence) => {
                 StockFlowVerdict::Transition(check_transition_equation(sentence, model.trace())?)
@@ -600,9 +634,9 @@ impl StockFlowInstitution {
     }
 
     fn translate(
-        morphism: &StockFlowRenaming,
-        sentence: &StockFlowSentence,
-    ) -> Result<StockFlowSentence, Error> {
+        morphism: &StockFlowRenaming<K>,
+        sentence: &StockFlowSentence<K>,
+    ) -> Result<StockFlowSentence<K>, Error<K>> {
         Self::validate_source_sentence(morphism, sentence)?;
         Ok(match sentence {
             StockFlowSentence::Transition(value) => {
@@ -612,7 +646,7 @@ impl StockFlowInstitution {
                 StockFlowSentence::LinearFlow(LinearFlowConstraint::new(
                     morphism.target().carrier(),
                     value.id().clone(),
-                    morphism.kinds.forward[value.kind()].clone(),
+                    morphism.kinds.forward[&value.kind()],
                     value.coefficients().iter().map(|(flow, coefficient)| {
                         (morphism.flows.forward[flow].clone(), coefficient.clone())
                     }),
@@ -628,7 +662,7 @@ impl StockFlowInstitution {
             StockFlowSentence::Graded(value) => {
                 let form = value.law().form();
                 let renamed = BalanceLaw::new(
-                    morphism.kinds.forward[form.kind()].clone(),
+                    morphism.kinds.forward[&form.kind()],
                     form.coefficients().map(|(axis, coefficient)| {
                         (morphism.axes.forward[axis].clone(), coefficient.clone())
                     }),
@@ -644,7 +678,7 @@ impl StockFlowInstitution {
                 let certificate = value.certificate();
                 let renamed = certify_nullspace(
                     morphism.target().carrier(),
-                    morphism.kinds.forward[certificate.law().kind()].clone(),
+                    morphism.kinds.forward[&certificate.law().kind()],
                     certificate.law().coefficients().map(|(axis, coefficient)| {
                         (morphism.axes.forward[axis].clone(), coefficient.clone())
                     }),
@@ -655,9 +689,9 @@ impl StockFlowInstitution {
     }
 
     fn validate_source_sentence(
-        morphism: &StockFlowRenaming,
-        sentence: &StockFlowSentence,
-    ) -> Result<(), Error> {
+        morphism: &StockFlowRenaming<K>,
+        sentence: &StockFlowSentence<K>,
+    ) -> Result<(), Error<K>> {
         match sentence {
             StockFlowSentence::Transition(_) => Ok(()),
             StockFlowSentence::LinearFlow(value) => value
@@ -681,9 +715,9 @@ impl StockFlowInstitution {
     }
 
     fn reduce(
-        morphism: &StockFlowRenaming,
-        model: &StockFlowModel,
-    ) -> Result<StockFlowModel, Error> {
+        morphism: &StockFlowRenaming<K>,
+        model: &StockFlowModel<K>,
+    ) -> Result<StockFlowModel<K>, Error<K>> {
         if model.signature != morphism.target {
             return Err(Error::ModelSignatureMismatch);
         }
@@ -746,12 +780,12 @@ impl StockFlowInstitution {
     }
 }
 
-impl Institution for StockFlowInstitution {
-    type Signature = StockFlowSignature;
-    type SignatureMorphism = StockFlowRenaming;
-    type Sentence = StockFlowSentence;
-    type Model = StockFlowModel;
-    type Error = Error;
+impl<K: Kind> Institution for StockFlowInstitution<K> {
+    type Signature = StockFlowSignature<K>;
+    type SignatureMorphism = StockFlowRenaming<K>;
+    type Sentence = StockFlowSentence<K>;
+    type Model = StockFlowModel<K>;
+    type Error = Error<K>;
 
     fn source<'a>(&self, morphism: &'a Self::SignatureMorphism) -> &'a Self::Signature {
         morphism.source()
@@ -805,19 +839,20 @@ impl Institution for StockFlowInstitution {
     }
 }
 
-fn remap_amounts<Source, Target>(
-    amounts: ExactAmounts<Source>,
+fn remap_amounts<Source, Target, K>(
+    amounts: ExactAmounts<Source, K>,
     ids: &BTreeMap<Source, Target>,
-    kinds: &BTreeMap<KindId, KindId>,
-) -> Result<ExactAmounts<Target>, Error>
+    kinds: &BTreeMap<K, K>,
+) -> Result<ExactAmounts<Target, K>, Error<K>>
 where
     Source: Symbol,
     Target: Symbol,
+    K: Kind,
 {
     ExactAmounts::new(
         amounts
             .iter()
-            .map(|(id, kind, amount)| (ids[id].clone(), kinds[kind].clone(), amount.clone())),
+            .map(|(id, kind, amount)| (ids[id].clone(), kinds[&kind], amount.clone())),
     )
     .map_err(Error::from)
 }

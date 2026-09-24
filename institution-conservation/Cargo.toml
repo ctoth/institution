@@ -1,6 +1,6 @@
 [package]
 name = "institution-conservation"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "The institution of exact conservation laws and finite traces"
@@ -11,14 +11,14 @@ readme = "../README.md"
 publish = true
 
 [dependencies]
-conservation-core = { version = "0.1.0", git = "https://github.com/ctoth/conservation.git", rev = "50f0364473053e8d9f381d53884dcc72cbb2862c" }
-conservation-stock-flow = { version = "0.1.0", git = "https://github.com/ctoth/conservation.git", rev = "50f0364473053e8d9f381d53884dcc72cbb2862c" }
-conservation-trace = { version = "0.1.0", git = "https://github.com/ctoth/conservation.git", rev = "50f0364473053e8d9f381d53884dcc72cbb2862c" }
+conservation-core = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "f10d98902640115d55c14076d3b58798a7618698" }
+conservation-stock-flow = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "f10d98902640115d55c14076d3b58798a7618698" }
+conservation-trace = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "f10d98902640115d55c14076d3b58798a7618698" }
 institution = { version = "0.1.0", path = ".." }
 
 [dev-dependencies]
-conservation-dynamics = { version = "0.1.0", git = "https://github.com/ctoth/conservation.git", rev = "50f0364473053e8d9f381d53884dcc72cbb2862c" }
-conservation-linear = { version = "0.1.0", git = "https://github.com/ctoth/conservation.git", rev = "50f0364473053e8d9f381d53884dcc72cbb2862c" }
+conservation-dynamics = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "f10d98902640115d55c14076d3b58798a7618698" }
+conservation-linear = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "f10d98902640115d55c14076d3b58798a7618698" }
 num-bigint = "0.4"
 num-rational = "0.4"
 proptest = "1"

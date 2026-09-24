@@ -75,7 +75,7 @@ fn all_category_functor_and_satisfaction_laws_hold_for_every_family() {
     let second = renaming(ECOLOGY, first.target().clone(), ECONOMY, target.clone());
     let third = renaming(ECONOMY, target.clone(), FOURTH, last);
     let target_model = valid_model(&target, ECONOMY);
-    let institution = StockFlowInstitution;
+    let institution = STOCK_FLOW;
 
     assert!(laws::check_signature_identity(&institution, &first).unwrap());
     assert!(laws::check_signature_associativity(&institution, &first, &second, &third).unwrap());
@@ -113,13 +113,9 @@ fn every_sentence_family_preserves_false_satisfaction_through_reduct() {
     ];
 
     for (sentence, target_model) in source_sentences.iter().zip(&false_models) {
-        let square = laws::check_satisfaction_square(
-            &StockFlowInstitution,
-            &morphism,
-            sentence,
-            target_model,
-        )
-        .unwrap();
+        let square =
+            laws::check_satisfaction_square(&STOCK_FLOW, &morphism, sentence, target_model)
+                .unwrap();
         assert!(square.holds());
         assert!(!square.translated_sentence_satisfied());
         assert!(!square.reduced_model_satisfies_source_sentence());
@@ -137,8 +133,7 @@ fn one_neutral_stock_flow_spec_instantiates_ecological_and_economic_models() {
             (&economic, valid_model(economic.target(), ECONOMY)),
         ] {
             let square =
-                laws::check_satisfaction_square(&StockFlowInstitution, morphism, &sentence, &model)
-                    .unwrap();
+                laws::check_satisfaction_square(&STOCK_FLOW, morphism, &sentence, &model).unwrap();
             assert!(square.holds());
             assert!(square.translated_sentence_satisfied());
         }
@@ -172,7 +167,7 @@ fn malformed_morphisms_and_model_membership_are_rejected() {
     ));
     let target_model = valid_model(&target, ECOLOGY);
     assert_eq!(
-        StockFlowInstitution.satisfies(&source, &target_model, &sentences(&source, NEUTRAL)[0]),
+        STOCK_FLOW.satisfies(&source, &target_model, &sentences(&source, NEUTRAL)[0]),
         Err(Error::ModelSignatureMismatch)
     );
 
@@ -189,7 +184,7 @@ fn malformed_morphisms_and_model_membership_are_rejected() {
         ),
     ));
     assert!(matches!(
-        StockFlowInstitution.translate_sentence(&valid_renaming, &outside),
+        STOCK_FLOW.translate_sentence(&valid_renaming, &outside),
         Err(Error::Carrier(StockFlowError::UnknownAxis(_)))
     ));
 
@@ -207,7 +202,7 @@ fn malformed_morphisms_and_model_membership_are_rejected() {
         foreign_certificate.open_balance(sentence("foreign-certificate")),
     );
     assert_eq!(
-        StockFlowInstitution.translate_sentence(&valid_renaming, &foreign),
+        STOCK_FLOW.translate_sentence(&valid_renaming, &foreign),
         Err(Error::Carrier(StockFlowError::CarrierMismatch))
     );
 }
@@ -283,37 +278,37 @@ proptest! {
         let source_sentences = sentences(&source, NEUTRAL);
         let source_sentence = &source_sentences[family];
 
-        prop_assert!(laws::check_signature_identity(&StockFlowInstitution, &first).unwrap());
+        prop_assert!(laws::check_signature_identity(&STOCK_FLOW, &first).unwrap());
         prop_assert!(laws::check_signature_associativity(
-            &StockFlowInstitution,
+            &STOCK_FLOW,
             &first,
             &second,
             &third,
         ).unwrap());
         prop_assert!(laws::check_sentence_identity(
-            &StockFlowInstitution,
+            &STOCK_FLOW,
             &source,
             source_sentence,
         ).unwrap());
         prop_assert!(laws::check_sentence_composition(
-            &StockFlowInstitution,
+            &STOCK_FLOW,
             &first,
             &second,
             source_sentence,
         ).unwrap());
         prop_assert!(laws::check_model_identity(
-            &StockFlowInstitution,
+            &STOCK_FLOW,
             first.target(),
             &ecological_model,
         ).unwrap());
         prop_assert!(laws::check_model_composition(
-            &StockFlowInstitution,
+            &STOCK_FLOW,
             &first,
             &second,
             &economic_model,
         ).unwrap());
         let square = laws::check_satisfaction_square(
-            &StockFlowInstitution,
+            &STOCK_FLOW,
             &first,
             source_sentence,
             &ecological_model,
@@ -346,7 +341,7 @@ proptest! {
             TransitionEquation::new(sentence("generated-transition")),
         );
         let square = laws::check_satisfaction_square(
-            &StockFlowInstitution,
+            &STOCK_FLOW,
             &morphism,
             &source_transition,
             &target_model,
@@ -354,7 +349,7 @@ proptest! {
         prop_assert!(square.holds());
         prop_assert!(square.translated_sentence_satisfied());
 
-        let reduced = StockFlowInstitution.reduct(&morphism, &target_model).unwrap();
+        let reduced = STOCK_FLOW.reduct(&morphism, &target_model).unwrap();
         prop_assert_eq!(
             reduced.trace().records()[0].before().amount(&axis(NEUTRAL.left_axis)),
             Some(&q(left_before)),

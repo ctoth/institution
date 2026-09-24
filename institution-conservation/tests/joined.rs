@@ -239,8 +239,8 @@ struct SettlementBridge;
 struct StaleSettlementBridge;
 
 fn evaluate_settlement(
-    signature: &Pair<Vocabulary, StockFlowSignature>,
-    model: &Pair<Values, StockFlowModel>,
+    signature: &Pair<Vocabulary, StockFlowSignature<FixtureKind>>,
+    model: &Pair<Values, StockFlowModel<FixtureKind>>,
     sentence: &SettledProduct,
 ) -> Result<SettlementVerdict, SettlementError> {
     if model.left.vocabulary != signature.left {
@@ -272,7 +272,7 @@ fn evaluate_settlement(
 
 impl Bridge for SettlementBridge {
     type Left = Products;
-    type Right = StockFlowInstitution;
+    type Right = StockFlowInstitution<FixtureKind>;
     type Sentence = SettledProduct;
     type Verdict = SettlementVerdict;
     type Error = SettlementError;
@@ -312,7 +312,7 @@ impl Bridge for SettlementBridge {
 
 impl Bridge for StaleSettlementBridge {
     type Left = Products;
-    type Right = StockFlowInstitution;
+    type Right = StockFlowInstitution<FixtureKind>;
     type Sentence = SettledProduct;
     type Verdict = SettlementVerdict;
     type Error = SettlementError;
@@ -436,7 +436,7 @@ fn target_values(quantity: i64) -> Values {
     }
 }
 
-fn stock_flow_model(internal: i64, equation_holds: bool) -> StockFlowModel {
+fn stock_flow_model(internal: i64, equation_holds: bool) -> StockFlowModel<FixtureKind> {
     model_with_values(
         &signature(NEUTRAL),
         NEUTRAL,
@@ -454,7 +454,7 @@ fn joined_model(
     quantity: i64,
     internal: i64,
     equation_holds: bool,
-) -> Pair<Values, StockFlowModel> {
+) -> Pair<Values, StockFlowModel<FixtureKind>> {
     Pair {
         left: target_values(quantity),
         right: stock_flow_model(internal, equation_holds),
@@ -473,20 +473,20 @@ fn left_sentence() -> Product {
     Product::new("price", "spare", "quantity")
 }
 
-fn right_sentence() -> StockFlowSentence {
+fn right_sentence() -> StockFlowSentence<FixtureKind> {
     StockFlowSentence::Transition(TransitionEquation::new(sentence("transition")))
 }
 
 fn join<B>(bridge: B) -> Join<B>
 where
-    B: Bridge<Left = Products, Right = StockFlowInstitution>,
+    B: Bridge<Left = Products, Right = StockFlowInstitution<FixtureKind>>,
 {
-    Join::new(Products, StockFlowInstitution, bridge)
+    Join::new(Products, STOCK_FLOW, bridge)
 }
 
 fn joined_morphism<B>(join: &Join<B>) -> JoinedSignatureMorphism<B>
 where
-    B: Bridge<Left = Products, Right = StockFlowInstitution>,
+    B: Bridge<Left = Products, Right = StockFlowInstitution<FixtureKind>>,
 {
     join.morphism(
         collapsing_map(),
@@ -494,7 +494,7 @@ where
     )
 }
 
-type SettlementSentence = JoinedSentence<Product, StockFlowSentence, SettledProduct>;
+type SettlementSentence = JoinedSentence<Product, StockFlowSentence<FixtureKind>, SettledProduct>;
 
 fn one_sentence_of_each_family() -> [SettlementSentence; 3] {
     [
@@ -526,7 +526,11 @@ fn joined_category_and_functor_laws_hold() {
 }
 
 /// `(sentence, target model, expected truth value)` over the collapsing morphism.
-fn square_cases() -> Vec<(SettlementSentence, Pair<Values, StockFlowModel>, bool)> {
+fn square_cases() -> Vec<(
+    SettlementSentence,
+    Pair<Values, StockFlowModel<FixtureKind>>,
+    bool,
+)> {
     vec![
         (
             JoinedSentence::Bridge(settled_product()),
@@ -676,7 +680,7 @@ fn embeddings_satisfy_the_comorphism_condition_with_both_truth_values() {
     );
     assert_eq!(
         right
-            .map_signature_morphism(&StockFlowInstitution.identity(&neutral).unwrap())
+            .map_signature_morphism(&STOCK_FLOW.identity(&neutral).unwrap())
             .unwrap(),
         join.identity(&right.map_signature(&neutral).unwrap())
             .unwrap()

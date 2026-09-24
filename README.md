@@ -20,8 +20,10 @@ conservation laws and finite traces as an institution. Its `stock_flow` module
 adds exact stock-flow carriers, structure-preserving symbol renamings, accepted
 transition traces, five typed sentence families, and evidence-retaining
 evaluation. Signed stock and ledger observations remain valid while requested
-and settled flow magnitudes retain the carrier's nonnegative contract. The
-adapter depends on the independent conservation foundation; neither foundation
+and settled flow magnitudes retain the carrier's nonnegative contract. Its
+signatures, sentences and models are generic over conservation's `Kind` trait;
+the adapter declares no kinds, and its tests declare their own. The adapter
+depends on the independent conservation foundation; neither foundation
 depends on the adapter.
 
 ## Architecture boundary

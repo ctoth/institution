@@ -7,28 +7,25 @@
 //! ecological model conserves its total while violating both inequalities, so
 //! every square is exercised in both outcomes.
 
-use conservation_core::{AxisId, BalanceLaw, Grade, GradedLaw, KindId, Provenance};
+mod support;
+
+use conservation_core::{AxisId, BalanceLaw, Grade, GradedLaw, Provenance};
 use conservation_trace::TraceState;
 use institution::{Institution, laws};
-use institution_conservation::{
-    AxisRenaming, ConservationInstitution, ConservationSignature, TraceModel,
-};
+use institution_conservation::{AxisRenaming, ConservationSignature, TraceModel};
 use num_bigint::BigInt;
 use num_rational::BigRational;
+use support::{CONSERVATION, FixtureKind, kind};
 
 fn axis(value: &str) -> AxisId {
     AxisId::new(value).unwrap()
-}
-
-fn kind(value: &str) -> KindId {
-    KindId::new(value).unwrap()
 }
 
 fn q(value: i64) -> BigRational {
     BigRational::from_integer(BigInt::from(value))
 }
 
-fn signature(entries: &[(&str, &str)]) -> ConservationSignature {
+fn signature(entries: &[(&str, &str)]) -> ConservationSignature<FixtureKind> {
     ConservationSignature::new(
         entries
             .iter()
@@ -46,7 +43,7 @@ fn state(entries: &[(&str, i64)]) -> TraceState {
     .unwrap()
 }
 
-fn graded(kind_name: &str, coefficients: &[(&str, i64)], grade: Grade) -> GradedLaw {
+fn graded(kind_name: &str, coefficients: &[(&str, i64)], grade: Grade) -> GradedLaw<FixtureKind> {
     GradedLaw::new(
         BalanceLaw::new(
             kind(kind_name),
@@ -61,14 +58,14 @@ fn graded(kind_name: &str, coefficients: &[(&str, i64)], grade: Grade) -> Graded
 }
 
 struct GradedCases {
-    source: ConservationSignature,
-    total: GradedLaw,
-    reservoir: GradedLaw,
-    dissipation: GradedLaw,
-    weather_renaming: AxisRenaming,
-    weather_model: TraceModel,
-    ecological_renaming: AxisRenaming,
-    ecological_model: TraceModel,
+    source: ConservationSignature<FixtureKind>,
+    total: GradedLaw<FixtureKind>,
+    reservoir: GradedLaw<FixtureKind>,
+    dissipation: GradedLaw<FixtureKind>,
+    weather_renaming: AxisRenaming<FixtureKind>,
+    weather_model: TraceModel<FixtureKind>,
+    ecological_renaming: AxisRenaming<FixtureKind>,
+    ecological_model: TraceModel<FixtureKind>,
 }
 
 fn shared_graded_cases() -> GradedCases {
@@ -168,14 +165,14 @@ fn shared_graded_cases() -> GradedCases {
 #[test]
 fn translation_preserves_every_grade() {
     let cases = shared_graded_cases();
-    let institution = ConservationInstitution;
+    let institution = CONSERVATION;
 
     for sentence in [&cases.total, &cases.reservoir, &cases.dissipation] {
         let translated = institution
             .translate_sentence(&cases.weather_renaming, sentence)
             .unwrap();
         assert_eq!(translated.grade(), sentence.grade());
-        assert_eq!(translated.form().kind(), &kind("energy"));
+        assert_eq!(translated.form().kind(), kind("energy"));
         assert_eq!(translated.form().provenance(), sentence.form().provenance());
     }
 }
@@ -183,7 +180,7 @@ fn translation_preserves_every_grade() {
 #[test]
 fn weather_squares_hold_true_for_all_three_grades() {
     let cases = shared_graded_cases();
-    let institution = ConservationInstitution;
+    let institution = CONSERVATION;
 
     for sentence in [&cases.total, &cases.reservoir, &cases.dissipation] {
         let square = laws::check_satisfaction_square(
@@ -202,7 +199,7 @@ fn weather_squares_hold_true_for_all_three_grades() {
 #[test]
 fn corrupted_ecological_squares_hold_with_false_inequality_grades() {
     let cases = shared_graded_cases();
-    let institution = ConservationInstitution;
+    let institution = CONSERVATION;
 
     // The balanced total still holds: corruption hid inside conserved books.
     let invariant_square = laws::check_satisfaction_square(
@@ -232,7 +229,7 @@ fn corrupted_ecological_squares_hold_with_false_inequality_grades() {
 #[test]
 fn graded_satisfaction_is_non_vacuous_across_both_targets() {
     let cases = shared_graded_cases();
-    let institution = ConservationInstitution;
+    let institution = CONSERVATION;
 
     let weather_sentences = [&cases.total, &cases.reservoir, &cases.dissipation].map(|sentence| {
         institution
@@ -271,7 +268,7 @@ fn graded_satisfaction_is_non_vacuous_across_both_targets() {
 #[test]
 fn graded_sentences_observe_the_sentence_functor_laws() {
     let cases = shared_graded_cases();
-    let institution = ConservationInstitution;
+    let institution = CONSERVATION;
 
     let onward = signature(&[
         ("alpha", "measure"),
