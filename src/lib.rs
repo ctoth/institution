@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod comorphism;
+pub mod join;
 pub mod laws;
 
 pub use comorphism::Comorphism;

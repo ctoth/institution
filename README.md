@@ -28,6 +28,10 @@ depends on the adapter.
 
 The crate defines the executable institution boundary directly rather than
 depending on a generic category framework. It does not provide model
-homomorphisms, derive macros, asynchronous operations, or comorphism APIs.
+homomorphisms, derive macros, or asynchronous operations. It provides
+comorphisms (`Comorphism`) and a generic joined institution (`join::Join`),
+whose models are pairs of part models and whose sentences are either part's
+sentences or consumer-declared bridge sentences; each part embeds into the
+join by a comorphism.
 Its law helpers observe examples; implementations and downstream test suites
 remain responsible for establishing the laws over their intended domains.
