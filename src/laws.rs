@@ -5,6 +5,7 @@
 //! input well-formedness and universal validity of the observed laws.
 
 use crate::Institution;
+use crate::comorphism::{Comorphism, ComorphismError, ComorphismLawError};
 
 /// Observes both identity laws of the signature category for one morphism.
 pub fn check_signature_identity<I>(
@@ -215,5 +216,79 @@ where
         }
     }
 
+    Ok(evidence)
+}
+
+/// Evaluates both sides of one comorphism satisfaction condition.
+///
+/// Given a source signature, a source sentence over it, and a target model
+/// over the mapped signature, observes
+/// `target_model |= translate(sentence)` iff `reduct(target_model) |= sentence`.
+/// Operation errors are returned with their side, not converted to a result.
+pub fn check_comorphism_satisfaction<C>(
+    comorphism: &C,
+    signature: &<C::Source as Institution>::Signature,
+    source_sentence: &<C::Source as Institution>::Sentence,
+    target_model: &<C::Target as Institution>::Model,
+) -> Result<SatisfactionSquare, ComorphismLawError<C>>
+where
+    C: Comorphism,
+{
+    let target_signature = comorphism
+        .map_signature(signature)
+        .map_err(ComorphismError::Comorphism)?;
+    let translated = comorphism
+        .translate_sentence(signature, source_sentence)
+        .map_err(ComorphismError::Comorphism)?;
+    let translated_sentence_satisfied = comorphism
+        .target_institution()
+        .satisfies(&target_signature, target_model, &translated)
+        .map_err(ComorphismError::Target)?;
+    let reduced = comorphism
+        .reduct(signature, target_model)
+        .map_err(ComorphismError::Comorphism)?;
+    let reduced_model_satisfies_source_sentence = comorphism
+        .source_institution()
+        .satisfies(signature, &reduced, source_sentence)
+        .map_err(ComorphismError::Source)?;
+    Ok(SatisfactionSquare {
+        translated_sentence_satisfied,
+        reduced_model_satisfies_source_sentence,
+    })
+}
+
+/// Counts the target-side outcomes of supplied comorphism squares.
+///
+/// Each case is `(source signature, source sentence, target model)`. A case
+/// counts as satisfying when the translated sentence holds in the target
+/// model. Agreement of each square is observed separately by
+/// [`check_comorphism_satisfaction`]. Empty and one-sided inputs are vacuous.
+pub fn check_comorphism_non_vacuity<'a, C, Cases>(
+    comorphism: &C,
+    cases: Cases,
+) -> Result<NonVacuity, ComorphismLawError<C>>
+where
+    C: Comorphism + 'a,
+    <C::Source as Institution>::Signature: 'a,
+    <C::Source as Institution>::Sentence: 'a,
+    <C::Target as Institution>::Model: 'a,
+    Cases: IntoIterator<
+        Item = (
+            &'a <C::Source as Institution>::Signature,
+            &'a <C::Source as Institution>::Sentence,
+            &'a <C::Target as Institution>::Model,
+        ),
+    >,
+{
+    let mut evidence = NonVacuity::default();
+    for (signature, sentence, model) in cases {
+        if check_comorphism_satisfaction(comorphism, signature, sentence, model)?
+            .translated_sentence_satisfied()
+        {
+            evidence.satisfying_cases += 1;
+        } else {
+            evidence.falsifying_cases += 1;
+        }
+    }
     Ok(evidence)
 }
