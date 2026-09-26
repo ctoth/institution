@@ -11,15 +11,15 @@ readme = "../README.md"
 publish = true
 
 [dependencies]
-conservation-core = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "6ffe40f5eaad67a956d061105c2782c46896f194" }
-conservation-stock-flow = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "6ffe40f5eaad67a956d061105c2782c46896f194" }
-conservation-trace = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "6ffe40f5eaad67a956d061105c2782c46896f194" }
+conservation-core = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "c834731f314507d6da0f4bfe59133de39a246ac0" }
+conservation-stock-flow = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "c834731f314507d6da0f4bfe59133de39a246ac0" }
+conservation-trace = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "c834731f314507d6da0f4bfe59133de39a246ac0" }
 institution = { version = "0.1.0", path = ".." }
 
 [dev-dependencies]
-conservation-bridgman = { git = "https://github.com/ctoth/conservation.git", rev = "6ffe40f5eaad67a956d061105c2782c46896f194" }
-conservation-dynamics = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "6ffe40f5eaad67a956d061105c2782c46896f194" }
-conservation-linear = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "6ffe40f5eaad67a956d061105c2782c46896f194" }
+conservation-bridgman = { git = "https://github.com/ctoth/conservation.git", rev = "c834731f314507d6da0f4bfe59133de39a246ac0" }
+conservation-dynamics = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "c834731f314507d6da0f4bfe59133de39a246ac0" }
+conservation-linear = { version = "0.3.0", git = "https://github.com/ctoth/conservation.git", rev = "c834731f314507d6da0f4bfe59133de39a246ac0" }
 num-bigint = "0.4"
 num-rational = "0.4"
 proptest = "1"
