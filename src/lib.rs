@@ -9,8 +9,10 @@
 pub mod comorphism;
 pub mod join;
 pub mod laws;
+pub mod renaming;
 
 pub use comorphism::Comorphism;
+pub use renaming::{Renaming, RenamingError, Vocabulary};
 
 /// Core executable operations of a Goguen-style institution.
 ///
