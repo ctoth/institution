@@ -17,14 +17,38 @@ reports whether supplied examples produced both truth values.
 
 `institution-conservation` is a downstream adapter that realizes exact
 conservation laws and finite traces as an institution. Its `stock_flow` module
-adds exact stock-flow carriers, structure-preserving symbol renamings, accepted
-transition traces, five typed sentence families, and evidence-retaining
-evaluation. Signed stock and ledger observations remain valid while requested
+adds exact stock-flow carriers, accepted transition traces, five typed sentence
+families, and evidence-retaining evaluation. `IntoStockFlow` maps the
+conservation institution into stock-flow, and both share one graded
+translation. Signed stock and ledger observations remain valid while requested
 and settled flow magnitudes retain the carrier's nonnegative contract. Its
 signatures, sentences and models are generic over conservation's `Kind` trait;
 the adapter declares no kinds, and its tests declare their own. The adapter
 depends on the independent conservation foundation; neither foundation
 depends on the adapter.
+
+## Supported morphisms
+
+Every signature morphism in the workspace is an `institution::Renaming`: a
+total, injective map of source symbols into a target vocabulary. Sentences
+translate forward along it; models reduce backward and forget the target
+symbols outside its image. Each vocabulary states what else a renaming must
+preserve.
+
+- Conservation signatures: renamings of axes. They may forget axes. The kind
+  map is derived from the axis map and must be a function; it need not be
+  injective.
+- Stock-flow signatures: renamings of axes, flows, boundaries and ledgers that
+  keep each symbol's class, incidence, boundary roles and ledger structure,
+  with a derived kind map. They may forget ledgers and their axes only: the
+  transition equation reads every stock, flow and boundary, so forgetting one
+  would break the satisfaction condition.
+- `IntoStockFlow` maps signatures, sentences and models totally, but it is a
+  comorphism only on the subcategory of axis-bijective renamings. It refuses a
+  renaming that forgets axes, because the image would forget stocks.
+
+Linear and affine charts, which would send a symbol to a combination of target
+symbols, are not supported.
 
 ## Architecture boundary
 

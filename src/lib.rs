@@ -18,9 +18,9 @@ pub use renaming::{Renaming, RenamingError, Vocabulary};
 ///
 /// For a signature morphism `m: source -> target`, sentence translation is
 /// covariant (`source` to `target`) and model reduct is contravariant (`target`
-/// to `source`). This trait does not encode a signature category or assert
-/// Implementations provide the identity and composition operations of the
-/// signature category. The type system does not prove their laws; the
+/// to `source`). Implementations provide the identity and composition
+/// operations of the signature category. The type system does not prove their
+/// laws; the
 /// observations in [`laws`] make those obligations executable on supplied
 /// examples. `Model` represents objects of each model category; model
 /// homomorphisms are outside this first executable boundary.
