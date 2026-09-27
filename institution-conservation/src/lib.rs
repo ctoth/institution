@@ -520,13 +520,20 @@ impl<K: Kind> Comorphism for IntoStockFlow<K> {
         &self,
         signature: &ConservationSignature<K>,
     ) -> Result<StockFlowSignature<K>, Error<K>> {
-        let stock = |axis: &AxisId| {
-            StockId::new(axis.as_str()).expect("an axis identifier is a nonblank stock identifier")
-        };
+        let mut stocks = Vec::with_capacity(signature.len());
+        for (axis, kind) in signature.axes() {
+            let stock = StockId::new(axis.as_str()).map_err(|error| {
+                Error::StockFlow(stock_flow::Error::StockIdentifier {
+                    axis: axis.clone(),
+                    error,
+                })
+            })?;
+            stocks.push((axis.clone(), stock, kind));
+        }
         let topology = FlowTopology::new(
-            signature.axes().map(|(axis, kind)| StockDefinition {
-                id: stock(axis),
-                kind,
+            stocks.iter().map(|(_, stock, kind)| StockDefinition {
+                id: stock.clone(),
+                kind: *kind,
             }),
             [],
             [],
@@ -534,10 +541,9 @@ impl<K: Kind> Comorphism for IntoStockFlow<K> {
         .map_err(|error| Error::StockFlow(StockFlowError::from(error).into()))?;
         let carrier = StockFlowCarrier::new(
             Arc::new(topology),
-            signature.axes().map(|(axis, _)| StockAxisDefinition {
-                stock: stock(axis),
-                axis: axis.clone(),
-            }),
+            stocks
+                .into_iter()
+                .map(|(axis, stock, _)| StockAxisDefinition { stock, axis }),
             [],
             [],
         )

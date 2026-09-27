@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 use std::mem::discriminant;
 use std::sync::Arc;
 
-use conservation_core::{AxisId, BalanceLaw, BalanceLawError, GradedLaw, Kind};
+use conservation_core::{AxisId, BalanceLaw, BalanceLawError, GradedLaw, IdentifierError, Kind};
 use conservation_stock_flow::{
     BoundaryCorrespondence, BoundaryId, BoundaryVerdict, CarrierIdentity, ExactAmounts,
     FlowConstraintVerdict, FlowId, GradedStateLaw, LedgerId, LinearFlowConstraint, OpenBalance,
@@ -406,6 +406,13 @@ pub enum Error<K> {
     LedgerBoundariesChanged(LedgerId),
     /// A model trace belongs to a different carrier identity.
     ModelSignatureMismatch,
+    /// The stock named after `axis` is not a valid stock identifier.
+    StockIdentifier {
+        /// The axis whose stock could not be named.
+        axis: AxisId,
+        /// Why its name is not a stock identifier.
+        error: IdentifierError,
+    },
     /// Sentence, trace, or certificate validation failed in the carrier.
     Carrier(StockFlowError<K>),
 }
@@ -446,6 +453,9 @@ impl<K: Kind> fmt::Display for Error<K> {
             }
             Self::ModelSignatureMismatch => {
                 formatter.write_str("model trace carrier does not match its signature")
+            }
+            Self::StockIdentifier { axis, error } => {
+                write!(formatter, "axis {axis} names no stock: {error}")
             }
             Self::Carrier(error) => write!(formatter, "stock-flow carrier error: {error}"),
         }
