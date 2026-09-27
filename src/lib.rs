@@ -20,9 +20,8 @@ pub use renaming::{Renaming, RenamingError, Vocabulary};
 /// covariant (`source` to `target`) and model reduct is contravariant (`target`
 /// to `source`). Implementations provide the identity and composition
 /// operations of the signature category. The type system does not prove their
-/// laws; the
-/// observations in [`laws`] make those obligations executable on supplied
-/// examples. `Model` represents objects of each model category; model
+/// laws; the observations in [`laws`] make those obligations executable on
+/// supplied examples. `Model` represents objects of each model category; model
 /// homomorphisms are outside this first executable boundary.
 pub trait Institution {
     /// The language vocabulary over which sentences and models are formed.
