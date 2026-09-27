@@ -29,7 +29,7 @@ depends on the adapter.
 
 ## Supported morphisms
 
-Every signature morphism in the workspace is an `institution::Renaming`: a
+Every signature morphism in the shipped institutions is an `institution::Renaming`: a
 total, injective map of source symbols into a target vocabulary. Sentences
 translate forward along it; models reduce backward and forget the target
 symbols outside its image. Each vocabulary states what else a renaming must
