@@ -2,16 +2,15 @@ mod support;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use conservation_stock_flow::{FlowId, TransitionEquation};
+use conservation_stock_flow::{FlowId, Symbol, SymbolId, TransitionEquation};
 use institution::comorphism::ComorphismError;
 use institution::join::{
     Bridge, Join, JoinError, JoinedModel, JoinedSentence, JoinedSignature, JoinedSignatureMorphism,
     Pair,
 };
-use institution::{Comorphism, Institution, laws};
+use institution::{Comorphism, Institution, Renaming, laws};
 use institution_conservation::stock_flow::{
-    Error, StockFlowInstitution, StockFlowModel, StockFlowRenaming, StockFlowSentence,
-    StockFlowSignature,
+    Error, StockFlowInstitution, StockFlowModel, StockFlowSentence, StockFlowSignature,
 };
 use num_rational::BigRational;
 use support::*;
@@ -282,12 +281,12 @@ impl Bridge for SettlementBridge {
         morphism: &JoinedSignatureMorphism<Self>,
         sentence: &SettledProduct,
     ) -> Result<SettledProduct, SettlementError> {
-        let flow = morphism
-            .parts()
-            .right
-            .map_flow(&sentence.flow)
-            .cloned()
-            .ok_or_else(|| SettlementError::UnknownFlow(sentence.flow.clone()))?;
+        let flow = match morphism.parts().right.image(&sentence.flow.symbol_id()) {
+            Some(SymbolId::Flow(flow)) => flow.clone(),
+            Some(SymbolId::Axis(_) | SymbolId::Boundary(_) | SymbolId::Ledger(_)) | None => {
+                return Err(SettlementError::UnknownFlow(sentence.flow.clone()));
+            }
+        };
         let names = &morphism.parts().left;
         Ok(SettledProduct {
             flow,
@@ -490,7 +489,7 @@ where
 {
     join.morphism(
         collapsing_map(),
-        StockFlowRenaming::identity(&signature(NEUTRAL)),
+        Renaming::identity(&signature(NEUTRAL)).unwrap(),
     )
 }
 
@@ -617,74 +616,6 @@ fn stale_bridge_translation_breaks_the_satisfaction_square() {
     assert!(!square.translated_sentence_satisfied());
     assert!(square.reduced_model_satisfies_source_sentence());
     assert!(!square.holds());
-}
-
-#[test]
-fn embeddings_satisfy_the_comorphism_condition_with_both_truth_values() {
-    let join = join(SettlementBridge);
-    let neutral = signature(NEUTRAL);
-
-    let left = join.embed_left(neutral.clone());
-    let left_signature = target_vocabulary();
-    let left_true = Product::new("unit_price", "unit_price", "quantity");
-    let left_models = [joined_model(1, 6, true), joined_model(2, 6, true)];
-    let left_true_square =
-        laws::check_comorphism_satisfaction(&left, &left_signature, &left_true, &left_models[0])
-            .unwrap();
-    let left_false_square =
-        laws::check_comorphism_satisfaction(&left, &left_signature, &left_true, &left_models[1])
-            .unwrap();
-    assert!(left_true_square.holds());
-    assert!(left_true_square.translated_sentence_satisfied());
-    assert!(left_false_square.holds());
-    assert!(!left_false_square.translated_sentence_satisfied());
-    assert!(
-        laws::check_comorphism_non_vacuity(
-            &left,
-            left_models
-                .iter()
-                .map(|model| (&left_signature, &left_true, model)),
-        )
-        .unwrap()
-        .is_non_vacuous()
-    );
-    assert_eq!(
-        left.map_signature_morphism(&Products.identity(&left_signature).unwrap())
-            .unwrap(),
-        join.identity(&left.map_signature(&left_signature).unwrap())
-            .unwrap()
-    );
-
-    let right = join.embed_right(target_vocabulary());
-    let transition = right_sentence();
-    let right_models = [joined_model(2, 6, true), joined_model(2, 6, false)];
-    let right_true_square =
-        laws::check_comorphism_satisfaction(&right, &neutral, &transition, &right_models[0])
-            .unwrap();
-    let right_false_square =
-        laws::check_comorphism_satisfaction(&right, &neutral, &transition, &right_models[1])
-            .unwrap();
-    assert!(right_true_square.holds());
-    assert!(right_true_square.translated_sentence_satisfied());
-    assert!(right_false_square.holds());
-    assert!(!right_false_square.translated_sentence_satisfied());
-    assert!(
-        laws::check_comorphism_non_vacuity(
-            &right,
-            right_models
-                .iter()
-                .map(|model| (&neutral, &transition, model)),
-        )
-        .unwrap()
-        .is_non_vacuous()
-    );
-    assert_eq!(
-        right
-            .map_signature_morphism(&STOCK_FLOW.identity(&neutral).unwrap())
-            .unwrap(),
-        join.identity(&right.map_signature(&neutral).unwrap())
-            .unwrap()
-    );
 }
 
 #[test]

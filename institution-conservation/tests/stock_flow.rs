@@ -1,13 +1,18 @@
 mod support;
 
 use conservation_core::{BalanceLaw, Grade, GradedLaw, Provenance};
+use std::sync::Arc;
+
+use conservation_dynamics::{FlowTopology, StockDefinition, StockId};
 use conservation_stock_flow::{
-    GradedStateLaw, LinearFlowConstraint, StockFlowError, SymbolId, TransitionEquation,
-    TransitionRecord, certify_nullspace,
+    BoundaryCorrespondence, GradedStateLaw, LinearFlowConstraint, StockAxisDefinition,
+    StockFlowCarrier, StockFlowError, Symbol, SymbolId, TransitionEquation, TransitionRecord,
+    certify_nullspace,
 };
-use institution::{Institution, laws};
+use institution::{Institution, Renaming, RenamingError, laws};
+use institution_conservation::KindConflict;
 use institution_conservation::stock_flow::{
-    Error, StockFlowInstitution, StockFlowRenaming, StockFlowSentence,
+    Error, StockFlowInstitution, StockFlowModel, StockFlowSentence, StockFlowSignature,
 };
 use proptest::prelude::*;
 use support::*;
@@ -30,7 +35,7 @@ fn every_sentence_family_has_true_and_false_semantic_evidence() {
         LinearFlowConstraint::new(
             signature.carrier(),
             sentence("false-linear"),
-            kind(NEUTRAL.kind),
+            NEUTRAL.kind,
             [(flow(NEUTRAL.flow), q(1))],
             q(4),
         )
@@ -40,7 +45,7 @@ fn every_sentence_family_has_true_and_false_semantic_evidence() {
         sentence("false-graded"),
         GradedLaw::new(
             BalanceLaw::new(
-                kind(NEUTRAL.kind),
+                NEUTRAL.kind,
                 [(axis(NEUTRAL.left_axis), q(1))],
                 Provenance::Declared,
             )
@@ -144,27 +149,17 @@ fn one_neutral_stock_flow_spec_instantiates_ecological_and_economic_models() {
 fn malformed_morphisms_and_model_membership_are_rejected() {
     let source = signature(NEUTRAL);
     let target = signature(ECOLOGY);
-    assert!(matches!(
-        StockFlowRenaming::new(
-            source.clone(),
-            target.clone(),
-            [(kind(NEUTRAL.kind), kind(ECOLOGY.kind))],
-            [
-                (axis(NEUTRAL.left_axis), axis(ECOLOGY.left_axis)),
-                (axis(NEUTRAL.right_axis), axis(ECOLOGY.right_axis)),
-            ],
-            [(flow(NEUTRAL.flow), flow(ECOLOGY.flow))],
-            [
-                (boundary(NEUTRAL.input), boundary(ECOLOGY.input)),
-                (boundary(NEUTRAL.output), boundary(ECOLOGY.output)),
-            ],
-            [
-                (ledger(NEUTRAL.input_ledger), ledger(ECOLOGY.input_ledger)),
-                (ledger(NEUTRAL.output_ledger), ledger(ECOLOGY.output_ledger)),
-            ],
-        ),
-        Err(Error::InvalidMorphism(_))
+    let mut without_output_axis = shared_pairs(NEUTRAL, ECOLOGY);
+    without_output_axis.push((
+        ledger(NEUTRAL.output_ledger).symbol_id(),
+        ledger(ECOLOGY.output_ledger).symbol_id(),
     ));
+    assert_eq!(
+        Renaming::new(source.clone(), target.clone(), without_output_axis),
+        Err(Error::Renaming(RenamingError::Unnamed(
+            axis(NEUTRAL.output_ledger_axis).symbol_id()
+        )))
+    );
     let target_model = valid_model(&target, ECOLOGY);
     assert_eq!(
         STOCK_FLOW.satisfies(&source, &target_model, &sentences(&source, NEUTRAL)[0]),
@@ -176,7 +171,7 @@ fn malformed_morphisms_and_model_membership_are_rejected() {
         sentence("outside-axis"),
         GradedLaw::from(
             BalanceLaw::new(
-                kind(NEUTRAL.kind),
+                NEUTRAL.kind,
                 [(axis("outside"), q(1))],
                 Provenance::Declared,
             )
@@ -191,7 +186,7 @@ fn malformed_morphisms_and_model_membership_are_rejected() {
     let other = signature(ECONOMY);
     let foreign_certificate = certify_nullspace(
         other.carrier(),
-        kind(ECONOMY.kind),
+        ECONOMY.kind,
         [
             (axis(ECONOMY.left_axis), q(1)),
             (axis(ECONOMY.right_axis), q(1)),
@@ -225,12 +220,342 @@ fn signed_observations_are_valid_but_negative_flow_magnitudes_are_rejected() {
     );
 
     let mut data = valid.trace().records()[0].clone().into_data();
-    data.requested_internal = amounts([(flow(NEUTRAL.flow), kind(NEUTRAL.kind), q(-1))]);
+    data.requested_internal = amounts([(flow(NEUTRAL.flow), NEUTRAL.kind, q(-1))]);
     assert_eq!(
         TransitionRecord::new(signature.carrier(), data),
         Err(StockFlowError::NegativeAmount(SymbolId::Flow(flow(
             NEUTRAL.flow
         ))))
+    );
+}
+
+/// One sentence of each family over the input-ledger-only carrier of `names`.
+fn input_ledger_sentences(
+    signature: &StockFlowSignature<FixtureKind>,
+    names: Names,
+) -> Vec<StockFlowSentence<FixtureKind>> {
+    let certificate = certify_nullspace(
+        signature.carrier(),
+        names.kind,
+        [
+            (axis(names.left_axis), q(1)),
+            (axis(names.right_axis), q(1)),
+        ],
+    )
+    .unwrap();
+    vec![
+        StockFlowSentence::Transition(TransitionEquation::new(sentence("transition"))),
+        StockFlowSentence::LinearFlow(
+            LinearFlowConstraint::new(
+                signature.carrier(),
+                sentence("linear-flow"),
+                names.kind,
+                [(flow(names.flow), q(1))],
+                q(3),
+            )
+            .unwrap(),
+        ),
+        StockFlowSentence::Boundary(BoundaryCorrespondence::new(
+            sentence("boundary"),
+            ledger(names.input_ledger),
+        )),
+        StockFlowSentence::Graded(GradedStateLaw::new(
+            sentence("graded"),
+            GradedLaw::new(
+                BalanceLaw::new(
+                    names.kind,
+                    [
+                        (axis(names.right_axis), q(1)),
+                        (axis(names.input_ledger_axis), q(1)),
+                    ],
+                    Provenance::Declared,
+                )
+                .unwrap(),
+                Grade::Nonnegative,
+            ),
+        )),
+        StockFlowSentence::OpenBalance(certificate.open_balance(sentence("open-balance"))),
+    ]
+}
+
+/// A carrier of unconnected stocks, one axis per stock.
+fn stocks(entries: &[(&str, FixtureKind)]) -> StockFlowSignature<FixtureKind> {
+    let topology = FlowTopology::new(
+        entries.iter().map(|(name, kind)| StockDefinition {
+            id: StockId::new(*name).unwrap(),
+            kind: *kind,
+        }),
+        [],
+        [],
+    )
+    .unwrap();
+    let carrier = StockFlowCarrier::new(
+        Arc::new(topology),
+        entries.iter().map(|(name, _)| StockAxisDefinition {
+            stock: StockId::new(*name).unwrap(),
+            axis: axis(name),
+        }),
+        [],
+        [],
+    )
+    .unwrap();
+    StockFlowSignature::new(Arc::new(carrier))
+}
+
+#[test]
+fn forgetting_a_ledger_keeps_every_square_with_both_truth_values() {
+    let morphism = forgetting_renaming(NEUTRAL, ECOLOGY);
+    let target = morphism.target().clone();
+    let drifted = with_output_ledger_drift(&valid_model(&target, ECOLOGY), ECOLOGY, 7);
+
+    // The drift is visible at the target and invisible after the reduct.
+    assert!(
+        !STOCK_FLOW
+            .satisfies(
+                &target,
+                &drifted,
+                &StockFlowSentence::Boundary(BoundaryCorrespondence::new(
+                    sentence("output"),
+                    ledger(ECOLOGY.output_ledger),
+                )),
+            )
+            .unwrap()
+    );
+    assert_eq!(
+        STOCK_FLOW.reduct(&morphism, &drifted).unwrap(),
+        STOCK_FLOW
+            .reduct(&morphism, &valid_model(&target, ECOLOGY))
+            .unwrap()
+    );
+
+    let false_models = [
+        model_with_values(&target, ECOLOGY, -2, 12, 3, 2, 1, false, true),
+        model_with_values(&target, ECOLOGY, -2, 12, 4, 2, 1, true, true),
+        model_with_values(&target, ECOLOGY, -2, 12, 3, 2, 1, true, false),
+        model_with_values(&target, ECOLOGY, -2, -12, 3, 2, 1, true, true),
+        model_with_values(&target, ECOLOGY, -2, 12, 3, 2, 1, false, true),
+    ];
+    let source_sentences = input_ledger_sentences(morphism.source(), NEUTRAL);
+    for (sentence, false_model) in source_sentences.iter().zip(&false_models) {
+        let kept =
+            laws::check_satisfaction_square(&STOCK_FLOW, &morphism, sentence, &drifted).unwrap();
+        assert!(kept.holds());
+        assert!(kept.translated_sentence_satisfied());
+
+        let broken =
+            laws::check_satisfaction_square(&STOCK_FLOW, &morphism, sentence, false_model).unwrap();
+        assert!(broken.holds());
+        assert!(!broken.translated_sentence_satisfied());
+    }
+}
+
+/// Stock-flow, except that a translated boundary sentence reads the target's
+/// output ledger, and a translated graded law its output ledger axis, which
+/// the forgetting renaming leaves out.
+struct ReadsForgottenLedger;
+
+impl Institution for ReadsForgottenLedger {
+    type Signature = StockFlowSignature<FixtureKind>;
+    type SignatureMorphism = Renaming<StockFlowSignature<FixtureKind>>;
+    type Sentence = StockFlowSentence<FixtureKind>;
+    type Model = StockFlowModel<FixtureKind>;
+    type Error = Error<FixtureKind>;
+
+    fn source<'a>(&self, morphism: &'a Self::SignatureMorphism) -> &'a Self::Signature {
+        STOCK_FLOW.source(morphism)
+    }
+
+    fn target<'a>(&self, morphism: &'a Self::SignatureMorphism) -> &'a Self::Signature {
+        STOCK_FLOW.target(morphism)
+    }
+
+    fn identity(
+        &self,
+        signature: &Self::Signature,
+    ) -> Result<Self::SignatureMorphism, Self::Error> {
+        STOCK_FLOW.identity(signature)
+    }
+
+    fn compose(
+        &self,
+        first: &Self::SignatureMorphism,
+        second: &Self::SignatureMorphism,
+    ) -> Result<Self::SignatureMorphism, Self::Error> {
+        STOCK_FLOW.compose(first, second)
+    }
+
+    fn translate_sentence(
+        &self,
+        morphism: &Self::SignatureMorphism,
+        sentence: &Self::Sentence,
+    ) -> Result<Self::Sentence, Self::Error> {
+        Ok(match STOCK_FLOW.translate_sentence(morphism, sentence)? {
+            StockFlowSentence::Boundary(translated) => StockFlowSentence::Boundary(
+                BoundaryCorrespondence::new(translated.id().clone(), ledger(ECOLOGY.output_ledger)),
+            ),
+            StockFlowSentence::Graded(translated) => {
+                let form = translated.law().form();
+                let redirected = form.coefficients().map(|(axis_id, coefficient)| {
+                    if axis_id == &axis(ECOLOGY.input_ledger_axis) {
+                        (axis(ECOLOGY.output_ledger_axis), coefficient.clone())
+                    } else {
+                        (axis_id.clone(), coefficient.clone())
+                    }
+                });
+                StockFlowSentence::Graded(GradedStateLaw::new(
+                    translated.id().clone(),
+                    GradedLaw::new(
+                        BalanceLaw::new(form.kind(), redirected, *form.provenance()).unwrap(),
+                        translated.law().grade(),
+                    ),
+                ))
+            }
+            translated => translated,
+        })
+    }
+
+    fn reduct(
+        &self,
+        morphism: &Self::SignatureMorphism,
+        model: &Self::Model,
+    ) -> Result<Self::Model, Self::Error> {
+        STOCK_FLOW.reduct(morphism, model)
+    }
+
+    fn satisfies(
+        &self,
+        signature: &Self::Signature,
+        model: &Self::Model,
+        sentence: &Self::Sentence,
+    ) -> Result<bool, Self::Error> {
+        STOCK_FLOW.satisfies(signature, model, sentence)
+    }
+}
+
+#[test]
+fn a_translation_that_reads_the_forgotten_ledger_breaks_the_square() {
+    let morphism = forgetting_renaming(NEUTRAL, ECOLOGY);
+    let drifted = with_output_ledger_drift(&valid_model(morphism.target(), ECOLOGY), ECOLOGY, 7);
+    let boundary = StockFlowSentence::Boundary(BoundaryCorrespondence::new(
+        sentence("boundary"),
+        ledger(NEUTRAL.input_ledger),
+    ));
+
+    let square =
+        laws::check_satisfaction_square(&ReadsForgottenLedger, &morphism, &boundary, &drifted)
+            .unwrap();
+    assert!(!square.holds());
+    assert!(!square.translated_sentence_satisfied());
+    assert!(square.reduced_model_satisfies_source_sentence());
+}
+
+#[test]
+fn a_graded_translation_that_reads_the_forgotten_ledger_axis_breaks_the_square() {
+    let morphism = forgetting_renaming(NEUTRAL, ECOLOGY);
+    // The output ledger falls far below zero; the input ledger stays positive.
+    let sunk = with_output_ledger_drift(&valid_model(morphism.target(), ECOLOGY), ECOLOGY, -100);
+    let graded = &input_ledger_sentences(morphism.source(), NEUTRAL)[3];
+    assert!(matches!(graded, StockFlowSentence::Graded(_)));
+
+    let faithful = laws::check_satisfaction_square(&STOCK_FLOW, &morphism, graded, &sunk).unwrap();
+    assert!(faithful.holds());
+    assert!(faithful.translated_sentence_satisfied());
+
+    let square =
+        laws::check_satisfaction_square(&ReadsForgottenLedger, &morphism, graded, &sunk).unwrap();
+    assert!(!square.holds());
+    assert!(!square.translated_sentence_satisfied());
+    assert!(square.reduced_model_satisfies_source_sentence());
+}
+
+#[test]
+fn a_renaming_may_forget_ledgers_but_not_what_the_transition_equation_reads() {
+    let source = stocks(&[("a", FixtureKind::Quantity)]);
+    let target = stocks(&[("a", FixtureKind::Quantity), ("b", FixtureKind::Quantity)]);
+    assert_eq!(
+        Renaming::new(
+            source,
+            target,
+            [(axis("a").symbol_id(), axis("a").symbol_id())]
+        ),
+        Err(Error::Forgotten(axis("b").symbol_id()))
+    );
+}
+
+#[test]
+fn a_renaming_keeps_classes_incidence_and_one_derived_kind_map() {
+    let source = signature_with(NEUTRAL, false);
+    let target = signature(ECOLOGY);
+    let crossed = shared_pairs(NEUTRAL, ECOLOGY)
+        .into_iter()
+        .map(|(from, to)| {
+            if to == flow(ECOLOGY.flow).symbol_id() {
+                (from, boundary(ECOLOGY.input).symbol_id())
+            } else if to == boundary(ECOLOGY.input).symbol_id() {
+                (from, flow(ECOLOGY.flow).symbol_id())
+            } else {
+                (from, to)
+            }
+        });
+    assert_eq!(
+        Renaming::new(source.clone(), target.clone(), crossed),
+        Err(Error::ClassChanged {
+            source: flow(NEUTRAL.flow).symbol_id(),
+            target: boundary(ECOLOGY.input).symbol_id(),
+        })
+    );
+
+    let swapped = [
+        (axis(NEUTRAL.left_axis), axis(ECOLOGY.right_axis)),
+        (axis(NEUTRAL.right_axis), axis(ECOLOGY.left_axis)),
+    ];
+    let mut reversed = shared_pairs(NEUTRAL, ECOLOGY)
+        .into_iter()
+        .skip(2)
+        .collect::<Vec<_>>();
+    reversed.extend(
+        swapped
+            .iter()
+            .map(|(from, to)| (from.symbol_id(), to.symbol_id())),
+    );
+    assert_eq!(
+        Renaming::new(source, target, reversed),
+        Err(Error::IncidenceChanged {
+            column: flow(NEUTRAL.flow).symbol_id(),
+            axis: axis(NEUTRAL.left_axis),
+        })
+    );
+
+    let one_kind = stocks(&[("a", FixtureKind::Q1), ("b", FixtureKind::Q1)]);
+    let two_kinds = stocks(&[("x", FixtureKind::Q1), ("y", FixtureKind::Q2)]);
+    assert_eq!(
+        Renaming::new(
+            one_kind,
+            two_kinds.clone(),
+            [
+                (axis("a").symbol_id(), axis("x").symbol_id()),
+                (axis("b").symbol_id(), axis("y").symbol_id()),
+            ],
+        ),
+        Err(Error::KindConflict(KindConflict {
+            symbol: axis("b").symbol_id(),
+            kind: FixtureKind::Q1,
+            first: FixtureKind::Q1,
+            second: FixtureKind::Q2,
+        }))
+    );
+
+    let merged = stocks(&[("x", FixtureKind::Quantity), ("y", FixtureKind::Quantity)]);
+    assert!(
+        Renaming::new(
+            stocks(&[("a", FixtureKind::Q1), ("b", FixtureKind::Q2)]),
+            merged,
+            [
+                (axis("a").symbol_id(), axis("x").symbol_id()),
+                (axis("b").symbol_id(), axis("y").symbol_id()),
+            ],
+        )
+        .is_ok()
     );
 }
 
