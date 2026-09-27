@@ -15,7 +15,7 @@ use institution::{Institution, laws};
 use institution_conservation::{AxisRenaming, ConservationSignature, TraceModel};
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use support::{CONSERVATION, FixtureKind, kind};
+use support::{CONSERVATION, FixtureKind};
 
 fn axis(value: &str) -> AxisId {
     AxisId::new(value).unwrap()
@@ -25,11 +25,11 @@ fn q(value: i64) -> BigRational {
     BigRational::from_integer(BigInt::from(value))
 }
 
-fn signature(entries: &[(&str, &str)]) -> ConservationSignature<FixtureKind> {
+fn signature(entries: &[(&str, FixtureKind)]) -> ConservationSignature<FixtureKind> {
     ConservationSignature::new(
         entries
             .iter()
-            .map(|(axis_name, kind_name)| (axis(axis_name), kind(kind_name))),
+            .map(|(axis_name, kind)| (axis(axis_name), *kind)),
     )
     .unwrap()
 }
@@ -43,10 +43,10 @@ fn state(entries: &[(&str, i64)]) -> TraceState {
     .unwrap()
 }
 
-fn graded(kind_name: &str, coefficients: &[(&str, i64)], grade: Grade) -> GradedLaw<FixtureKind> {
+fn graded(kind: FixtureKind, coefficients: &[(&str, i64)], grade: Grade) -> GradedLaw<FixtureKind> {
     GradedLaw::new(
         BalanceLaw::new(
-            kind(kind_name),
+            kind,
             coefficients
                 .iter()
                 .map(|(axis_name, value)| (axis(axis_name), q(*value))),
@@ -70,24 +70,32 @@ struct GradedCases {
 
 fn shared_graded_cases() -> GradedCases {
     let source = signature(&[
-        ("upper_store", "neutral_energy"),
-        ("lower_store", "neutral_energy"),
-        ("dissipated", "neutral_energy"),
+        ("upper_store", FixtureKind::NeutralEnergy),
+        ("lower_store", FixtureKind::NeutralEnergy),
+        ("dissipated", FixtureKind::NeutralEnergy),
     ]);
     let total = graded(
-        "neutral_energy",
+        FixtureKind::NeutralEnergy,
         &[("upper_store", 1), ("lower_store", 1), ("dissipated", 1)],
         Grade::Invariant,
     );
-    let reservoir = graded("neutral_energy", &[("lower_store", 1)], Grade::Nonnegative);
-    let dissipation = graded("neutral_energy", &[("dissipated", 1)], Grade::Nondecreasing);
+    let reservoir = graded(
+        FixtureKind::NeutralEnergy,
+        &[("lower_store", 1)],
+        Grade::Nonnegative,
+    );
+    let dissipation = graded(
+        FixtureKind::NeutralEnergy,
+        &[("dissipated", 1)],
+        Grade::Nondecreasing,
+    );
 
     // The Lorenz reading: available potential energy converts to kinetic
     // energy, and friction moves both into a heat axis that only grows.
     let weather_target = signature(&[
-        ("available_potential", "energy"),
-        ("kinetic", "energy"),
-        ("dissipated_heat", "energy"),
+        ("available_potential", FixtureKind::Energy),
+        ("kinetic", FixtureKind::Energy),
+        ("dissipated_heat", FixtureKind::Energy),
     ]);
     let weather_renaming = AxisRenaming::new(
         source.clone(),
@@ -97,7 +105,7 @@ fn shared_graded_cases() -> GradedCases {
             (axis("lower_store"), axis("kinetic")),
             (axis("dissipated"), axis("dissipated_heat")),
         ],
-        [(kind("neutral_energy"), kind("energy"))],
+        [(FixtureKind::NeutralEnergy, FixtureKind::Energy)],
     )
     .unwrap();
     let weather_model = TraceModel::new(
@@ -125,9 +133,9 @@ fn shared_graded_cases() -> GradedCases {
     // A corrupted ecological ledger: total biomass energy balances, but the
     // consumer pool dips negative and respiration runs backwards.
     let ecological_target = signature(&[
-        ("producer_pool", "biomass_energy"),
-        ("consumer_pool", "biomass_energy"),
-        ("respired", "biomass_energy"),
+        ("producer_pool", FixtureKind::BiomassEnergy),
+        ("consumer_pool", FixtureKind::BiomassEnergy),
+        ("respired", FixtureKind::BiomassEnergy),
     ]);
     let ecological_renaming = AxisRenaming::new(
         source.clone(),
@@ -137,7 +145,7 @@ fn shared_graded_cases() -> GradedCases {
             (axis("lower_store"), axis("consumer_pool")),
             (axis("dissipated"), axis("respired")),
         ],
-        [(kind("neutral_energy"), kind("biomass_energy"))],
+        [(FixtureKind::NeutralEnergy, FixtureKind::BiomassEnergy)],
     )
     .unwrap();
     let ecological_model = TraceModel::new(
@@ -172,7 +180,7 @@ fn translation_preserves_every_grade() {
             .translate_sentence(&cases.weather_renaming, sentence)
             .unwrap();
         assert_eq!(translated.grade(), sentence.grade());
-        assert_eq!(translated.form().kind(), kind("energy"));
+        assert_eq!(translated.form().kind(), FixtureKind::Energy);
         assert_eq!(translated.form().provenance(), sentence.form().provenance());
     }
 }
@@ -271,9 +279,9 @@ fn graded_sentences_observe_the_sentence_functor_laws() {
     let institution = CONSERVATION;
 
     let onward = signature(&[
-        ("alpha", "measure"),
-        ("beta", "measure"),
-        ("gamma", "measure"),
+        ("alpha", FixtureKind::Measure),
+        ("beta", FixtureKind::Measure),
+        ("gamma", FixtureKind::Measure),
     ]);
     let second = AxisRenaming::new(
         cases.weather_renaming.target().clone(),
@@ -283,7 +291,7 @@ fn graded_sentences_observe_the_sentence_functor_laws() {
             (axis("kinetic"), axis("beta")),
             (axis("dissipated_heat"), axis("gamma")),
         ],
-        [(kind("energy"), kind("measure"))],
+        [(FixtureKind::Energy, FixtureKind::Measure)],
     )
     .unwrap();
 

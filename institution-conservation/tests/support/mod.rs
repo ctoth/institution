@@ -19,14 +19,14 @@ use num_rational::BigRational;
 
 pub mod kinds;
 
-pub use kinds::{FixtureKind, kind};
+pub use kinds::FixtureKind;
 
 pub const CONSERVATION: ConservationInstitution<FixtureKind> = ConservationInstitution::new();
 pub const STOCK_FLOW: StockFlowInstitution<FixtureKind> = StockFlowInstitution::new();
 
 #[derive(Clone, Copy)]
 pub struct Names {
-    pub kind: &'static str,
+    pub kind: FixtureKind,
     pub left_stock: &'static str,
     pub right_stock: &'static str,
     pub left_axis: &'static str,
@@ -41,7 +41,7 @@ pub struct Names {
 }
 
 pub const NEUTRAL: Names = Names {
-    kind: "quantity",
+    kind: FixtureKind::Quantity,
     left_stock: "left-stock",
     right_stock: "right-stock",
     left_axis: "left",
@@ -56,7 +56,7 @@ pub const NEUTRAL: Names = Names {
 };
 
 pub const ECOLOGY: Names = Names {
-    kind: "biomass",
+    kind: FixtureKind::Biomass,
     left_stock: "producer-stock",
     right_stock: "consumer-stock",
     left_axis: "producer-pool",
@@ -71,7 +71,7 @@ pub const ECOLOGY: Names = Names {
 };
 
 pub const ECONOMY: Names = Names {
-    kind: "money",
+    kind: FixtureKind::Money,
     left_stock: "deposit-stock",
     right_stock: "cash-stock",
     left_axis: "deposits",
@@ -86,7 +86,7 @@ pub const ECONOMY: Names = Names {
 };
 
 pub const FOURTH: Names = Names {
-    kind: "energy",
+    kind: FixtureKind::Energy,
     left_stock: "upper-stock",
     right_stock: "lower-stock",
     left_axis: "upper",
@@ -131,7 +131,7 @@ pub fn amounts<I: Symbol>(
 }
 
 pub fn signature(names: Names) -> StockFlowSignature<FixtureKind> {
-    let quantity = kind(names.kind);
+    let quantity = names.kind;
     let left = StockId::new(names.left_stock).unwrap();
     let right = StockId::new(names.right_stock).unwrap();
     let topology = FlowTopology::new(
@@ -213,7 +213,7 @@ pub fn renaming(
     StockFlowRenaming::new(
         source,
         target,
-        [(kind(source_names.kind), kind(target_names.kind))],
+        [(source_names.kind, target_names.kind)],
         [
             (axis(source_names.left_axis), axis(target_names.left_axis)),
             (axis(source_names.right_axis), axis(target_names.right_axis)),
@@ -257,7 +257,7 @@ pub fn model_with_values(
     equation_holds: bool,
     ledgers_hold: bool,
 ) -> StockFlowModel<FixtureKind> {
-    let quantity = kind(names.kind);
+    let quantity = names.kind;
     let left_after = if equation_holds {
         left_before - internal + input
     } else {
@@ -316,7 +316,7 @@ pub fn sentences(
     signature: &StockFlowSignature<FixtureKind>,
     names: Names,
 ) -> Vec<StockFlowSentence<FixtureKind>> {
-    let quantity = kind(names.kind);
+    let quantity = names.kind;
     let graded = GradedLaw::new(
         BalanceLaw::new(
             quantity,

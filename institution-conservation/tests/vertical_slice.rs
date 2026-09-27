@@ -7,7 +7,7 @@ use institution::{Institution, laws};
 use institution_conservation::{AxisRenaming, ConservationSignature, Error, TraceModel};
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use support::{CONSERVATION, FixtureKind, kind};
+use support::{CONSERVATION, FixtureKind};
 
 fn axis(value: &str) -> AxisId {
     AxisId::new(value).unwrap()
@@ -17,11 +17,11 @@ fn q(value: i64) -> BigRational {
     BigRational::from_integer(BigInt::from(value))
 }
 
-fn signature(entries: &[(&str, &str)]) -> ConservationSignature<FixtureKind> {
+fn signature(entries: &[(&str, FixtureKind)]) -> ConservationSignature<FixtureKind> {
     ConservationSignature::new(
         entries
             .iter()
-            .map(|(axis_name, kind_name)| (axis(axis_name), kind(kind_name))),
+            .map(|(axis_name, kind)| (axis(axis_name), *kind)),
     )
     .unwrap()
 }
@@ -38,12 +38,12 @@ fn state(entries: &[(&str, i64)]) -> TraceState {
 fn derive_law(
     left: &str,
     right: &str,
-    kind_name: &str,
+    kind: FixtureKind,
     rows: [Vec<BigRational>; 2],
     source: NullspaceSource,
 ) -> BalanceLaw<FixtureKind> {
     let matrix = TransitionMatrix::new([axis(left), axis(right)], rows.to_vec()).unwrap();
-    derive_left_nullspace(&matrix, kind(kind_name), source)
+    derive_left_nullspace(&matrix, kind, source)
         .unwrap()
         .into_iter()
         .next()
@@ -61,20 +61,22 @@ struct SharedCases {
 
 fn shared_neutral_cases() -> SharedCases {
     let source = signature(&[
-        ("neutral_left", "neutral_quantity"),
-        ("neutral_right", "neutral_quantity"),
+        ("neutral_left", FixtureKind::NeutralQuantity),
+        ("neutral_right", FixtureKind::NeutralQuantity),
     ]);
     // One exact directed incidence edge gives the neutral law [1, 1].
     let law = GradedLaw::from(derive_law(
         "neutral_left",
         "neutral_right",
-        "neutral_quantity",
+        FixtureKind::NeutralQuantity,
         [vec![q(-1)], vec![q(1)]],
         NullspaceSource::Incidence,
     ));
 
-    let ecological_target =
-        signature(&[("consumer_pool", "biomass"), ("producer_pool", "biomass")]);
+    let ecological_target = signature(&[
+        ("consumer_pool", FixtureKind::Biomass),
+        ("producer_pool", FixtureKind::Biomass),
+    ]);
     let ecological_renaming = AxisRenaming::new(
         source.clone(),
         ecological_target.clone(),
@@ -82,7 +84,7 @@ fn shared_neutral_cases() -> SharedCases {
             (axis("neutral_left"), axis("consumer_pool")),
             (axis("neutral_right"), axis("producer_pool")),
         ],
-        [(kind("neutral_quantity"), kind("biomass"))],
+        [(FixtureKind::NeutralQuantity, FixtureKind::Biomass)],
     )
     .unwrap();
     let ecological_model = TraceModel::new(
@@ -94,7 +96,10 @@ fn shared_neutral_cases() -> SharedCases {
     )
     .unwrap();
 
-    let economic_target = signature(&[("asset_account", "money"), ("stock_account", "money")]);
+    let economic_target = signature(&[
+        ("asset_account", FixtureKind::Money),
+        ("stock_account", FixtureKind::Money),
+    ]);
     let economic_renaming = AxisRenaming::new(
         source.clone(),
         economic_target.clone(),
@@ -102,7 +107,7 @@ fn shared_neutral_cases() -> SharedCases {
             (axis("neutral_left"), axis("asset_account")),
             (axis("neutral_right"), axis("stock_account")),
         ],
-        [(kind("neutral_quantity"), kind("money"))],
+        [(FixtureKind::NeutralQuantity, FixtureKind::Money)],
     )
     .unwrap();
     let economic_model = TraceModel::new(
@@ -144,8 +149,8 @@ fn one_neutral_source_law_gives_true_ecological_and_false_economic_squares() {
     let economic_law = institution
         .translate_sentence(&cases.economic_renaming, &economic_source_law)
         .unwrap();
-    assert_eq!(ecological_law.form().kind(), kind("biomass"));
-    assert_eq!(economic_law.form().kind(), kind("money"));
+    assert_eq!(ecological_law.form().kind(), FixtureKind::Biomass);
+    assert_eq!(economic_law.form().kind(), FixtureKind::Money);
     assert_eq!(ecological_law.grade(), cases.law.grade());
     assert_eq!(economic_law.grade(), cases.law.grade());
     assert_eq!(
@@ -210,12 +215,15 @@ fn one_neutral_source_law_gives_true_ecological_and_false_economic_squares() {
 
 #[test]
 fn asymmetric_stoichiometric_law_exposes_translation_and_reduct_direction() {
-    let source = signature(&[("left", "quantity"), ("right", "quantity")]);
+    let source = signature(&[
+        ("left", FixtureKind::Quantity),
+        ("right", FixtureKind::Quantity),
+    ]);
     // The exact stoichiometric column [2, -1] has left-nullspace basis [1, 2].
     let law = derive_law(
         "left",
         "right",
-        "quantity",
+        FixtureKind::Quantity,
         [vec![q(2)], vec![q(-1)]],
         NullspaceSource::Stoichiometric,
     );
@@ -223,12 +231,15 @@ fn asymmetric_stoichiometric_law_exposes_translation_and_reduct_direction() {
     assert_eq!(law.coefficient(&axis("right")), &q(2));
     assert_eq!(law.provenance(), &Provenance::StoichiometricNullspace);
 
-    let target = signature(&[("alpha", "measure"), ("zeta", "measure")]);
+    let target = signature(&[
+        ("alpha", FixtureKind::Measure),
+        ("zeta", FixtureKind::Measure),
+    ]);
     let reversing = AxisRenaming::new(
         source.clone(),
         target.clone(),
         [(axis("left"), axis("zeta")), (axis("right"), axis("alpha"))],
-        [(kind("quantity"), kind("measure"))],
+        [(FixtureKind::Quantity, FixtureKind::Measure)],
     )
     .unwrap();
     let target_model = TraceModel::new(
@@ -243,7 +254,7 @@ fn asymmetric_stoichiometric_law_exposes_translation_and_reduct_direction() {
     let translated = CONSERVATION
         .translate_sentence(&reversing, &GradedLaw::from(law))
         .unwrap();
-    assert_eq!(translated.form().kind(), kind("measure"));
+    assert_eq!(translated.form().kind(), FixtureKind::Measure);
     assert_eq!(translated.form().coefficient(&axis("alpha")), &q(2));
     assert_eq!(translated.form().coefficient(&axis("zeta")), &q(1));
 
@@ -255,11 +266,14 @@ fn asymmetric_stoichiometric_law_exposes_translation_and_reduct_direction() {
 
 #[test]
 fn provenance_tags_do_not_change_satisfaction_semantics() {
-    let source = signature(&[("left", "quantity"), ("right", "quantity")]);
+    let source = signature(&[
+        ("left", FixtureKind::Quantity),
+        ("right", FixtureKind::Quantity),
+    ]);
     let derived = derive_law(
         "left",
         "right",
-        "quantity",
+        FixtureKind::Quantity,
         [vec![q(2)], vec![q(-1)]],
         NullspaceSource::Stoichiometric,
     );
@@ -298,13 +312,16 @@ fn signatures_axis_maps_and_models_retain_their_validation() {
         Err(Error::EmptySignature)
     );
     assert_eq!(
-        ConservationSignature::new([(axis("A"), kind("quantity")), (axis("A"), kind("quantity")),]),
+        ConservationSignature::new([
+            (axis("A"), FixtureKind::Quantity),
+            (axis("A"), FixtureKind::Quantity),
+        ]),
         Err(Error::DuplicateSignatureAxis(axis("A")))
     );
 
-    let source = signature(&[("A", "quantity"), ("B", "quantity")]);
-    let target = signature(&[("X", "measure"), ("Y", "measure")]);
-    let kind_map = [(kind("quantity"), kind("measure"))];
+    let source = signature(&[("A", FixtureKind::Quantity), ("B", FixtureKind::Quantity)]);
+    let target = signature(&[("X", FixtureKind::Measure), ("Y", FixtureKind::Measure)]);
+    let kind_map = [(FixtureKind::Quantity, FixtureKind::Measure)];
     assert_eq!(
         AxisRenaming::new(
             source.clone(),
@@ -342,8 +359,8 @@ fn signatures_axis_maps_and_models_retain_their_validation() {
 
 #[test]
 fn kind_maps_reject_missing_extra_duplicate_conflicting_and_nonbijective_entries() {
-    let source = signature(&[("A", "q1"), ("B", "q2")]);
-    let target = signature(&[("X", "r1"), ("Y", "r2")]);
+    let source = signature(&[("A", FixtureKind::Q1), ("B", FixtureKind::Q2)]);
+    let target = signature(&[("X", FixtureKind::R1), ("Y", FixtureKind::R2)]);
     let axes = [(axis("A"), axis("X")), (axis("B"), axis("Y"))];
 
     assert_eq!(
@@ -351,7 +368,7 @@ fn kind_maps_reject_missing_extra_duplicate_conflicting_and_nonbijective_entries
             source.clone(),
             target.clone(),
             axes.clone(),
-            [(kind("q1"), kind("r1"))],
+            [(FixtureKind::Q1, FixtureKind::R1)],
         ),
         Err(Error::IncompleteKindRenaming {
             mapped: 1,
@@ -364,37 +381,50 @@ fn kind_maps_reject_missing_extra_duplicate_conflicting_and_nonbijective_entries
             target.clone(),
             axes.clone(),
             [
-                (kind("q1"), kind("r1")),
-                (kind("q2"), kind("r2")),
-                (kind("outside"), kind("r1")),
+                (FixtureKind::Q1, FixtureKind::R1),
+                (FixtureKind::Q2, FixtureKind::R2),
+                (FixtureKind::Outside, FixtureKind::R1),
             ],
         ),
-        Err(Error::KindMappingSourceOutsideSignature(kind("outside")))
+        Err(Error::KindMappingSourceOutsideSignature(
+            FixtureKind::Outside
+        ))
     );
     assert_eq!(
         AxisRenaming::new(
             source.clone(),
             target.clone(),
             axes.clone(),
-            [(kind("q1"), kind("r1")), (kind("q2"), kind("outside")),],
+            [
+                (FixtureKind::Q1, FixtureKind::R1),
+                (FixtureKind::Q2, FixtureKind::Outside),
+            ],
         ),
-        Err(Error::KindMappingTargetOutsideSignature(kind("outside")))
+        Err(Error::KindMappingTargetOutsideSignature(
+            FixtureKind::Outside
+        ))
     );
     assert_eq!(
         AxisRenaming::new(
             source.clone(),
             target.clone(),
             axes.clone(),
-            [(kind("q1"), kind("r1")), (kind("q1"), kind("r1")),],
+            [
+                (FixtureKind::Q1, FixtureKind::R1),
+                (FixtureKind::Q1, FixtureKind::R1),
+            ],
         ),
-        Err(Error::DuplicateSourceKind(kind("q1")))
+        Err(Error::DuplicateSourceKind(FixtureKind::Q1))
     );
     assert!(matches!(
         AxisRenaming::new(
             source.clone(),
             target.clone(),
             axes.clone(),
-            [(kind("q1"), kind("r1")), (kind("q1"), kind("r2")),],
+            [
+                (FixtureKind::Q1, FixtureKind::R1),
+                (FixtureKind::Q1, FixtureKind::R2),
+            ],
         ),
         Err(Error::ConflictingKindMapping { .. })
     ));
@@ -403,19 +433,26 @@ fn kind_maps_reject_missing_extra_duplicate_conflicting_and_nonbijective_entries
             source.clone(),
             target.clone(),
             axes.clone(),
-            [(kind("q1"), kind("r1")), (kind("q2"), kind("r1")),],
+            [
+                (FixtureKind::Q1, FixtureKind::R1),
+                (FixtureKind::Q2, FixtureKind::R1),
+            ],
         ),
-        Err(Error::DuplicateTargetKind(kind("r1")))
+        Err(Error::DuplicateTargetKind(FixtureKind::R1))
     );
 
-    let target_with_extra_kind = signature(&[("X", "r1"), ("Y", "r1"), ("Z", "r2")]);
-    let one_kind_source = signature(&[("A", "q1"), ("B", "q1")]);
+    let target_with_extra_kind = signature(&[
+        ("X", FixtureKind::R1),
+        ("Y", FixtureKind::R1),
+        ("Z", FixtureKind::R2),
+    ]);
+    let one_kind_source = signature(&[("A", FixtureKind::Q1), ("B", FixtureKind::Q1)]);
     assert_eq!(
         AxisRenaming::new(
             one_kind_source,
             target_with_extra_kind,
             [(axis("A"), axis("X")), (axis("B"), axis("Y"))],
-            [(kind("q1"), kind("r1"))],
+            [(FixtureKind::Q1, FixtureKind::R1)],
         ),
         Err(Error::NonBijectiveKindRenaming {
             mapped_targets: 1,
@@ -429,7 +466,10 @@ fn kind_maps_reject_missing_extra_duplicate_conflicting_and_nonbijective_entries
             source,
             target,
             mismatched_axes,
-            [(kind("q1"), kind("r1")), (kind("q2"), kind("r2"))],
+            [
+                (FixtureKind::Q1, FixtureKind::R1),
+                (FixtureKind::Q2, FixtureKind::R2)
+            ],
         ),
         Err(Error::AxisKindMappingMismatch { .. })
     ));
@@ -437,7 +477,7 @@ fn kind_maps_reject_missing_extra_duplicate_conflicting_and_nonbijective_entries
 
 #[test]
 fn malformed_memberships_error_instead_of_returning_false() {
-    let source = signature(&[("A", "quantity"), ("B", "quantity")]);
+    let source = signature(&[("A", FixtureKind::Quantity), ("B", FixtureKind::Quantity)]);
     let model = TraceModel::new(
         source.clone(),
         vec![state(&[("A", 1), ("B", 1)]), state(&[("A", 2), ("B", 0)])],
@@ -445,7 +485,7 @@ fn malformed_memberships_error_instead_of_returning_false() {
     .unwrap();
     let outside_law = GradedLaw::from(
         BalanceLaw::new(
-            kind("quantity"),
+            FixtureKind::Quantity,
             [(axis("outside"), q(1))],
             Provenance::Declared,
         )
@@ -456,7 +496,7 @@ fn malformed_memberships_error_instead_of_returning_false() {
         Err(Error::SentenceAxisOutsideSignature(axis("outside")))
     );
 
-    let other = signature(&[("X", "quantity"), ("Y", "quantity")]);
+    let other = signature(&[("X", FixtureKind::Quantity), ("Y", FixtureKind::Quantity)]);
     let other_model = TraceModel::new(
         other,
         vec![state(&[("X", 1), ("Y", 1)]), state(&[("X", 2), ("Y", 0)])],
@@ -465,7 +505,7 @@ fn malformed_memberships_error_instead_of_returning_false() {
     let law = GradedLaw::from(derive_law(
         "A",
         "B",
-        "quantity",
+        FixtureKind::Quantity,
         [vec![q(-1)], vec![q(1)]],
         NullspaceSource::Incidence,
     ));
@@ -477,34 +517,34 @@ fn malformed_memberships_error_instead_of_returning_false() {
 
 #[test]
 fn conservation_adapter_observes_signature_category_and_functor_laws() {
-    let source = signature(&[("A", "quantity"), ("B", "quantity")]);
-    let middle = signature(&[("X", "mass"), ("Y", "mass")]);
-    let target = signature(&[("U", "energy"), ("V", "energy")]);
-    let last = signature(&[("I", "currency"), ("J", "currency")]);
+    let source = signature(&[("A", FixtureKind::Quantity), ("B", FixtureKind::Quantity)]);
+    let middle = signature(&[("X", FixtureKind::Mass), ("Y", FixtureKind::Mass)]);
+    let target = signature(&[("U", FixtureKind::Energy), ("V", FixtureKind::Energy)]);
+    let last = signature(&[("I", FixtureKind::Currency), ("J", FixtureKind::Currency)]);
     let first = AxisRenaming::new(
         source.clone(),
         middle,
         [(axis("A"), axis("X")), (axis("B"), axis("Y"))],
-        [(kind("quantity"), kind("mass"))],
+        [(FixtureKind::Quantity, FixtureKind::Mass)],
     )
     .unwrap();
     let second = AxisRenaming::new(
         first.target().clone(),
         target.clone(),
         [(axis("X"), axis("U")), (axis("Y"), axis("V"))],
-        [(kind("mass"), kind("energy"))],
+        [(FixtureKind::Mass, FixtureKind::Energy)],
     )
     .unwrap();
     let third = AxisRenaming::new(
         target.clone(),
         last,
         [(axis("U"), axis("I")), (axis("V"), axis("J"))],
-        [(kind("energy"), kind("currency"))],
+        [(FixtureKind::Energy, FixtureKind::Currency)],
     )
     .unwrap();
     let law = GradedLaw::from(
         BalanceLaw::new(
-            kind("quantity"),
+            FixtureKind::Quantity,
             [(axis("A"), q(1)), (axis("B"), q(1))],
             Provenance::Declared,
         )

@@ -30,7 +30,7 @@ fn every_sentence_family_has_true_and_false_semantic_evidence() {
         LinearFlowConstraint::new(
             signature.carrier(),
             sentence("false-linear"),
-            kind(NEUTRAL.kind),
+            NEUTRAL.kind,
             [(flow(NEUTRAL.flow), q(1))],
             q(4),
         )
@@ -40,7 +40,7 @@ fn every_sentence_family_has_true_and_false_semantic_evidence() {
         sentence("false-graded"),
         GradedLaw::new(
             BalanceLaw::new(
-                kind(NEUTRAL.kind),
+                NEUTRAL.kind,
                 [(axis(NEUTRAL.left_axis), q(1))],
                 Provenance::Declared,
             )
@@ -148,7 +148,7 @@ fn malformed_morphisms_and_model_membership_are_rejected() {
         StockFlowRenaming::new(
             source.clone(),
             target.clone(),
-            [(kind(NEUTRAL.kind), kind(ECOLOGY.kind))],
+            [(NEUTRAL.kind, ECOLOGY.kind)],
             [
                 (axis(NEUTRAL.left_axis), axis(ECOLOGY.left_axis)),
                 (axis(NEUTRAL.right_axis), axis(ECOLOGY.right_axis)),
@@ -176,7 +176,7 @@ fn malformed_morphisms_and_model_membership_are_rejected() {
         sentence("outside-axis"),
         GradedLaw::from(
             BalanceLaw::new(
-                kind(NEUTRAL.kind),
+                NEUTRAL.kind,
                 [(axis("outside"), q(1))],
                 Provenance::Declared,
             )
@@ -191,7 +191,7 @@ fn malformed_morphisms_and_model_membership_are_rejected() {
     let other = signature(ECONOMY);
     let foreign_certificate = certify_nullspace(
         other.carrier(),
-        kind(ECONOMY.kind),
+        ECONOMY.kind,
         [
             (axis(ECONOMY.left_axis), q(1)),
             (axis(ECONOMY.right_axis), q(1)),
@@ -225,7 +225,7 @@ fn signed_observations_are_valid_but_negative_flow_magnitudes_are_rejected() {
     );
 
     let mut data = valid.trace().records()[0].clone().into_data();
-    data.requested_internal = amounts([(flow(NEUTRAL.flow), kind(NEUTRAL.kind), q(-1))]);
+    data.requested_internal = amounts([(flow(NEUTRAL.flow), NEUTRAL.kind, q(-1))]);
     assert_eq!(
         TransitionRecord::new(signature.carrier(), data),
         Err(StockFlowError::NegativeAmount(SymbolId::Flow(flow(
