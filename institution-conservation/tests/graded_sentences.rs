@@ -14,8 +14,6 @@ use conservation_trace::TraceState;
 use institution::Renaming;
 use institution::{Institution, laws};
 use institution_conservation::{ConservationSignature, TraceModel};
-
-type AxisRenaming = Renaming<ConservationSignature<FixtureKind>>;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use support::{CONSERVATION, FixtureKind};
@@ -65,9 +63,9 @@ struct GradedCases {
     total: GradedLaw<FixtureKind>,
     reservoir: GradedLaw<FixtureKind>,
     dissipation: GradedLaw<FixtureKind>,
-    weather_renaming: AxisRenaming,
+    weather_renaming: Renaming<ConservationSignature<FixtureKind>>,
     weather_model: TraceModel<FixtureKind>,
-    ecological_renaming: AxisRenaming,
+    ecological_renaming: Renaming<ConservationSignature<FixtureKind>>,
     ecological_model: TraceModel<FixtureKind>,
 }
 
@@ -100,7 +98,7 @@ fn shared_graded_cases() -> GradedCases {
         ("kinetic", FixtureKind::Energy),
         ("dissipated_heat", FixtureKind::Energy),
     ]);
-    let weather_renaming = AxisRenaming::new(
+    let weather_renaming = Renaming::new(
         source.clone(),
         weather_target.clone(),
         [
@@ -139,7 +137,7 @@ fn shared_graded_cases() -> GradedCases {
         ("consumer_pool", FixtureKind::BiomassEnergy),
         ("respired", FixtureKind::BiomassEnergy),
     ]);
-    let ecological_renaming = AxisRenaming::new(
+    let ecological_renaming = Renaming::new(
         source.clone(),
         ecological_target.clone(),
         [
@@ -284,7 +282,7 @@ fn graded_sentences_observe_the_sentence_functor_laws() {
         ("beta", FixtureKind::Measure),
         ("gamma", FixtureKind::Measure),
     ]);
-    let second = AxisRenaming::new(
+    let second = Renaming::new(
         cases.weather_renaming.target().clone(),
         onward,
         [

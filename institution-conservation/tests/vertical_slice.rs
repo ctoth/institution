@@ -9,8 +9,6 @@ use institution::{Renaming, RenamingError};
 use institution_conservation::{
     ConservationInstitution, ConservationSignature, Error, KindConflict, TraceModel,
 };
-
-type AxisRenaming = Renaming<ConservationSignature<FixtureKind>>;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use support::{CONSERVATION, FixtureKind};
@@ -59,9 +57,9 @@ fn derive_law(
 struct SharedCases {
     source: ConservationSignature<FixtureKind>,
     law: GradedLaw<FixtureKind>,
-    ecological_renaming: AxisRenaming,
+    ecological_renaming: Renaming<ConservationSignature<FixtureKind>>,
     ecological_model: TraceModel<FixtureKind>,
-    economic_renaming: AxisRenaming,
+    economic_renaming: Renaming<ConservationSignature<FixtureKind>>,
     economic_model: TraceModel<FixtureKind>,
 }
 
@@ -83,7 +81,7 @@ fn shared_neutral_cases() -> SharedCases {
         ("consumer_pool", FixtureKind::Biomass),
         ("producer_pool", FixtureKind::Biomass),
     ]);
-    let ecological_renaming = AxisRenaming::new(
+    let ecological_renaming = Renaming::new(
         source.clone(),
         ecological_target.clone(),
         [
@@ -105,7 +103,7 @@ fn shared_neutral_cases() -> SharedCases {
         ("asset_account", FixtureKind::Money),
         ("stock_account", FixtureKind::Money),
     ]);
-    let economic_renaming = AxisRenaming::new(
+    let economic_renaming = Renaming::new(
         source.clone(),
         economic_target.clone(),
         [
@@ -239,7 +237,7 @@ fn asymmetric_stoichiometric_law_exposes_translation_and_reduct_direction() {
         ("alpha", FixtureKind::Measure),
         ("zeta", FixtureKind::Measure),
     ]);
-    let reversing = AxisRenaming::new(
+    let reversing = Renaming::new(
         source.clone(),
         target.clone(),
         [(axis("left"), axis("zeta")), (axis("right"), axis("alpha"))],
@@ -325,11 +323,11 @@ fn signatures_axis_maps_and_models_retain_their_validation() {
     let source = signature(&[("A", FixtureKind::Quantity), ("B", FixtureKind::Quantity)]);
     let target = signature(&[("X", FixtureKind::Measure), ("Y", FixtureKind::Measure)]);
     assert_eq!(
-        AxisRenaming::new(source.clone(), target.clone(), [(axis("A"), axis("X"))]),
+        Renaming::new(source.clone(), target.clone(), [(axis("A"), axis("X"))]),
         Err(Error::Renaming(RenamingError::Unnamed(axis("B"))))
     );
     assert_eq!(
-        AxisRenaming::new(
+        Renaming::new(
             source.clone(),
             target,
             [(axis("A"), axis("X")), (axis("B"), axis("X"))],
@@ -359,7 +357,7 @@ fn the_kind_map_is_derived_from_the_axis_map() {
         ("Z", FixtureKind::Mass),
     ]);
     assert_eq!(
-        AxisRenaming::new(
+        Renaming::new(
             source.clone(),
             target.clone(),
             [(axis("A"), axis("X")), (axis("B"), axis("Y"))],
@@ -372,7 +370,7 @@ fn the_kind_map_is_derived_from_the_axis_map() {
         }))
     );
 
-    let renaming = AxisRenaming::new(
+    let renaming = Renaming::new(
         source,
         target,
         [(axis("A"), axis("X")), (axis("B"), axis("Z"))],
@@ -392,7 +390,7 @@ fn the_kind_map_is_derived_from_the_axis_map() {
 
     // Two kinds may share an image; the map need not be injective.
     assert!(
-        AxisRenaming::new(
+        Renaming::new(
             signature(&[("A", FixtureKind::Q1), ("B", FixtureKind::Q2)]),
             signature(&[("X", FixtureKind::Mass), ("Y", FixtureKind::Mass)]),
             [(axis("A"), axis("X")), (axis("B"), axis("Y"))],
@@ -447,19 +445,19 @@ fn conservation_adapter_observes_signature_category_and_functor_laws() {
     let middle = signature(&[("X", FixtureKind::Mass), ("Y", FixtureKind::Mass)]);
     let target = signature(&[("U", FixtureKind::Energy), ("V", FixtureKind::Energy)]);
     let last = signature(&[("I", FixtureKind::Currency), ("J", FixtureKind::Currency)]);
-    let first = AxisRenaming::new(
+    let first = Renaming::new(
         source.clone(),
         middle,
         [(axis("A"), axis("X")), (axis("B"), axis("Y"))],
     )
     .unwrap();
-    let second = AxisRenaming::new(
+    let second = Renaming::new(
         first.target().clone(),
         target.clone(),
         [(axis("X"), axis("U")), (axis("Y"), axis("V"))],
     )
     .unwrap();
-    let third = AxisRenaming::new(
+    let third = Renaming::new(
         target.clone(),
         last,
         [(axis("U"), axis("I")), (axis("V"), axis("J"))],
@@ -501,8 +499,8 @@ fn three_axes() -> ConservationSignature<FixtureKind> {
 }
 
 /// Renames `A` and `B` into `X` and `Y`, forgetting `Z`.
-fn forgetting_z() -> AxisRenaming {
-    AxisRenaming::new(
+fn forgetting_z() -> Renaming<ConservationSignature<FixtureKind>> {
+    Renaming::new(
         two_axes(),
         three_axes(),
         [(axis("A"), axis("X")), (axis("B"), axis("Y"))],
@@ -565,7 +563,7 @@ struct TranslatesIntoZ;
 
 impl Institution for TranslatesIntoZ {
     type Signature = ConservationSignature<FixtureKind>;
-    type SignatureMorphism = AxisRenaming;
+    type SignatureMorphism = Renaming<ConservationSignature<FixtureKind>>;
     type Sentence = GradedLaw<FixtureKind>;
     type Model = TraceModel<FixtureKind>;
     type Error = Error<FixtureKind>;
@@ -598,7 +596,7 @@ impl Institution for TranslatesIntoZ {
         morphism: &Self::SignatureMorphism,
         sentence: &Self::Sentence,
     ) -> Result<Self::Sentence, Self::Error> {
-        let stale = AxisRenaming::new(
+        let stale = Renaming::new(
             morphism.source().clone(),
             morphism.target().clone(),
             [(axis("A"), axis("X")), (axis("B"), axis("Z"))],
