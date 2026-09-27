@@ -350,7 +350,8 @@ fn forgetting_a_ledger_keeps_every_square_with_both_truth_values() {
 }
 
 /// Stock-flow, except that a translated boundary sentence reads the target's
-/// output ledger, which the forgetting renaming leaves out.
+/// output ledger, and a translated graded law its output ledger axis, which
+/// the forgetting renaming leaves out.
 struct ReadsForgottenLedger;
 
 impl Institution for ReadsForgottenLedger {
@@ -392,6 +393,23 @@ impl Institution for ReadsForgottenLedger {
             StockFlowSentence::Boundary(translated) => StockFlowSentence::Boundary(
                 BoundaryCorrespondence::new(translated.id().clone(), ledger(ECOLOGY.output_ledger)),
             ),
+            StockFlowSentence::Graded(translated) => {
+                let form = translated.law().form();
+                let redirected = form.coefficients().map(|(axis_id, coefficient)| {
+                    if axis_id == &axis(ECOLOGY.input_ledger_axis) {
+                        (axis(ECOLOGY.output_ledger_axis), coefficient.clone())
+                    } else {
+                        (axis_id.clone(), coefficient.clone())
+                    }
+                });
+                StockFlowSentence::Graded(GradedStateLaw::new(
+                    translated.id().clone(),
+                    GradedLaw::new(
+                        BalanceLaw::new(form.kind(), redirected, *form.provenance()).unwrap(),
+                        translated.law().grade(),
+                    ),
+                ))
+            }
             translated => translated,
         })
     }
@@ -426,6 +444,25 @@ fn a_translation_that_reads_the_forgotten_ledger_breaks_the_square() {
     let square =
         laws::check_satisfaction_square(&ReadsForgottenLedger, &morphism, &boundary, &drifted)
             .unwrap();
+    assert!(!square.holds());
+    assert!(!square.translated_sentence_satisfied());
+    assert!(square.reduced_model_satisfies_source_sentence());
+}
+
+#[test]
+fn a_graded_translation_that_reads_the_forgotten_ledger_axis_breaks_the_square() {
+    let morphism = forgetting_renaming(NEUTRAL, ECOLOGY);
+    // The output ledger falls far below zero; the input ledger stays positive.
+    let sunk = with_output_ledger_drift(&valid_model(morphism.target(), ECOLOGY), ECOLOGY, -100);
+    let graded = &input_ledger_sentences(morphism.source(), NEUTRAL)[3];
+    assert!(matches!(graded, StockFlowSentence::Graded(_)));
+
+    let faithful = laws::check_satisfaction_square(&STOCK_FLOW, &morphism, graded, &sunk).unwrap();
+    assert!(faithful.holds());
+    assert!(faithful.translated_sentence_satisfied());
+
+    let square =
+        laws::check_satisfaction_square(&ReadsForgottenLedger, &morphism, graded, &sunk).unwrap();
     assert!(!square.holds());
     assert!(!square.translated_sentence_satisfied());
     assert!(square.reduced_model_satisfies_source_sentence());
