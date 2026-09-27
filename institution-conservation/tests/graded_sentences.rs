@@ -11,8 +11,11 @@ mod support;
 
 use conservation_core::{AxisId, BalanceLaw, Grade, GradedLaw, Provenance};
 use conservation_trace::TraceState;
+use institution::Renaming;
 use institution::{Institution, laws};
-use institution_conservation::{AxisRenaming, ConservationSignature, TraceModel};
+use institution_conservation::{ConservationSignature, TraceModel};
+
+type AxisRenaming = Renaming<ConservationSignature<FixtureKind>>;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use support::{CONSERVATION, FixtureKind};
@@ -62,9 +65,9 @@ struct GradedCases {
     total: GradedLaw<FixtureKind>,
     reservoir: GradedLaw<FixtureKind>,
     dissipation: GradedLaw<FixtureKind>,
-    weather_renaming: AxisRenaming<FixtureKind>,
+    weather_renaming: AxisRenaming,
     weather_model: TraceModel<FixtureKind>,
-    ecological_renaming: AxisRenaming<FixtureKind>,
+    ecological_renaming: AxisRenaming,
     ecological_model: TraceModel<FixtureKind>,
 }
 
@@ -105,7 +108,6 @@ fn shared_graded_cases() -> GradedCases {
             (axis("lower_store"), axis("kinetic")),
             (axis("dissipated"), axis("dissipated_heat")),
         ],
-        [(FixtureKind::NeutralEnergy, FixtureKind::Energy)],
     )
     .unwrap();
     let weather_model = TraceModel::new(
@@ -145,7 +147,6 @@ fn shared_graded_cases() -> GradedCases {
             (axis("lower_store"), axis("consumer_pool")),
             (axis("dissipated"), axis("respired")),
         ],
-        [(FixtureKind::NeutralEnergy, FixtureKind::BiomassEnergy)],
     )
     .unwrap();
     let ecological_model = TraceModel::new(
@@ -291,7 +292,6 @@ fn graded_sentences_observe_the_sentence_functor_laws() {
             (axis("kinetic"), axis("beta")),
             (axis("dissipated_heat"), axis("gamma")),
         ],
-        [(FixtureKind::Energy, FixtureKind::Measure)],
     )
     .unwrap();
 

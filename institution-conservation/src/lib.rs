@@ -6,15 +6,30 @@
 //! balance, a nonnegativity constraint, or a nondecreasing (dissipation)
 //! constraint. Translation renames the form and preserves the grade, so one
 //! satisfaction condition covers every grade.
+//!
+//! Signature morphisms are [`Renaming`]s of axes. They may forget axes; the
+//! kind map follows from the axis map. [`IntoStockFlow`] sends this
+//! institution into [`stock_flow::StockFlowInstitution`], whose graded
+//! translation both institutions share.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error as StdError;
 use std::fmt;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
-use conservation_core::{AxisId, BalanceLaw, BalanceLawError, GradedLaw, Kind};
+use conservation_core::{AxisId, BalanceLawError, GradedLaw, Kind};
+use conservation_dynamics::{FlowTopology, StockDefinition, StockId};
+use conservation_stock_flow::{
+    GradedStateLaw, SentenceId, StockAxisDefinition, StockFlowCarrier, StockFlowError, Symbol,
+};
 use conservation_trace::{LawVerdict, TraceError, TraceState, TraceStateError, check_law};
-use institution::{Institution, Renaming, Vocabulary};
+use institution::{Comorphism, Institution, Renaming, RenamingError, Vocabulary};
+
+use crate::stock_flow::{
+    AxisVocabulary, StockFlowInstitution, StockFlowModel, StockFlowSentence, StockFlowSignature,
+    translate_graded,
+};
 
 pub mod stock_flow;
 
@@ -143,169 +158,37 @@ impl<K: Kind> ConservationSignature<K> {
     }
 }
 
-/// A bijective, kind-preserving renaming with explicit source and target.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AxisRenaming<K> {
-    source: ConservationSignature<K>,
-    target: ConservationSignature<K>,
-    forward: BTreeMap<AxisId, AxisId>,
-    inverse: BTreeMap<AxisId, AxisId>,
-    kind_forward: BTreeMap<K, K>,
+/// A renaming of axes must derive one kind map; it may forget axes.
+impl<K: Kind> Vocabulary for ConservationSignature<K> {
+    type Symbol = AxisId;
+    type Error = Error<K>;
+
+    fn symbols(&self) -> Vec<AxisId> {
+        self.axes.keys().cloned().collect()
+    }
+
+    fn check(renaming: &Renaming<Self>) -> Result<(), Error<K>> {
+        check_derived_kinds(renaming).map_err(Error::KindConflict)
+    }
 }
 
-impl<K: Kind> AxisRenaming<K> {
-    /// Validates and constructs an axis renaming.
-    pub fn new(
-        source: ConservationSignature<K>,
-        target: ConservationSignature<K>,
-        mappings: impl IntoIterator<Item = (AxisId, AxisId)>,
-        kind_mappings: impl IntoIterator<Item = (K, K)>,
-    ) -> Result<Self, Error<K>> {
-        let mut kind_forward = BTreeMap::<K, K>::new();
-        let mut kind_inverse = BTreeMap::<K, K>::new();
-        for (source_kind, target_kind) in kind_mappings {
-            if !source.kinds.contains(&source_kind) {
-                return Err(Error::KindMappingSourceOutsideSignature(source_kind));
-            }
-            if !target.kinds.contains(&target_kind) {
-                return Err(Error::KindMappingTargetOutsideSignature(target_kind));
-            }
-            if let Some(&existing_target) = kind_forward.get(&source_kind) {
-                if existing_target == target_kind {
-                    return Err(Error::DuplicateSourceKind(source_kind));
-                }
-                return Err(Error::ConflictingKindMapping {
-                    source_kind,
-                    first_target: existing_target,
-                    second_target: target_kind,
-                });
-            }
-            if kind_inverse.insert(target_kind, source_kind).is_some() {
-                return Err(Error::DuplicateTargetKind(target_kind));
-            }
-            kind_forward.insert(source_kind, target_kind);
-        }
-        if kind_forward.len() != source.kinds.len() {
-            return Err(Error::IncompleteKindRenaming {
-                mapped: kind_forward.len(),
-                source_kinds: source.kinds.len(),
-            });
-        }
-        if kind_inverse.len() != target.kinds.len() {
-            return Err(Error::NonBijectiveKindRenaming {
-                mapped_targets: kind_inverse.len(),
-                target_kinds: target.kinds.len(),
-            });
-        }
+impl<K: Kind> Kinded for ConservationSignature<K> {
+    type Kind = K;
 
-        let mut forward = BTreeMap::new();
-        let mut inverse = BTreeMap::new();
+    fn kind_of(&self, axis: &AxisId) -> Option<K> {
+        self.kind(axis)
+    }
+}
 
-        for (source_axis, target_axis) in mappings {
-            let Some(source_kind) = source.kind(&source_axis) else {
-                return Err(Error::RenamingSourceAxisOutsideSignature(source_axis));
-            };
-            let Some(target_kind) = target.kind(&target_axis) else {
-                return Err(Error::RenamingTargetAxisOutsideSignature(target_axis));
-            };
-            let mapped_kind = kind_forward
-                .get(&source_kind)
-                .copied()
-                .ok_or(Error::KindMappingSourceOutsideSignature(source_kind))?;
-            if mapped_kind != target_kind {
-                return Err(Error::AxisKindMappingMismatch {
-                    source_axis,
-                    target_axis,
-                    mapped_kind,
-                    target_kind,
-                });
-            }
-            if forward
-                .insert(source_axis.clone(), target_axis.clone())
-                .is_some()
-            {
-                return Err(Error::DuplicateSourceAxis(source_axis));
-            }
-            if inverse.insert(target_axis.clone(), source_axis).is_some() {
-                return Err(Error::DuplicateTargetAxis(target_axis));
-            }
-        }
-
-        if forward.len() != source.len() {
-            return Err(Error::IncompleteRenaming {
-                mapped: forward.len(),
-                source_axes: source.len(),
-            });
-        }
-        if inverse.len() != target.len() {
-            return Err(Error::NonBijectiveRenaming {
-                mapped_targets: inverse.len(),
-                target_axes: target.len(),
-            });
-        }
-
-        Ok(Self {
-            source,
-            target,
-            forward,
-            inverse,
-            kind_forward,
-        })
+impl<K: Kind> AxisVocabulary for ConservationSignature<K> {
+    fn axis_image<'a>(renaming: &'a Renaming<Self>, axis: &AxisId) -> Result<&'a AxisId, Error<K>> {
+        renaming
+            .image(axis)
+            .ok_or_else(|| Error::Renaming(RenamingError::Unnamed(axis.clone())))
     }
 
-    /// Returns the explicit source signature.
-    pub fn source(&self) -> &ConservationSignature<K> {
-        &self.source
-    }
-
-    /// Returns the explicit target signature.
-    pub fn target(&self) -> &ConservationSignature<K> {
-        &self.target
-    }
-
-    fn identity(signature: &ConservationSignature<K>) -> Result<Self, Error<K>> {
-        Self::new(
-            signature.clone(),
-            signature.clone(),
-            signature
-                .axes()
-                .map(|(axis, _)| (axis.clone(), axis.clone())),
-            signature.kinds().map(|kind| (kind, kind)),
-        )
-    }
-
-    fn compose(first: &Self, second: &Self) -> Result<Self, Error<K>> {
-        if first.target != second.source {
-            return Err(Error::NonComposableRenamings);
-        }
-        let mappings = first
-            .forward
-            .iter()
-            .map(|(source, middle)| {
-                let target = second
-                    .forward
-                    .get(middle)
-                    .expect("validated second renaming covers its source");
-                (source.clone(), target.clone())
-            })
-            .collect::<Vec<_>>();
-        let kind_mappings = first
-            .kind_forward
-            .iter()
-            .map(|(source, middle)| {
-                let target = second
-                    .kind_forward
-                    .get(middle)
-                    .expect("validated second kind renaming covers its source");
-                (*source, *target)
-            })
-            .collect::<Vec<_>>();
-        Self::new(
-            first.source.clone(),
-            second.target.clone(),
-            mappings,
-            kind_mappings,
-        )
+    fn unknown_kind(kind: K) -> Error<K> {
+        Error::KindOutsideSignature(kind)
     }
 }
 
@@ -358,51 +241,15 @@ pub enum Error<K> {
     EmptySignature,
     /// A signature repeated an axis.
     DuplicateSignatureAxis(AxisId),
-    /// A mapping source did not belong to the source signature.
-    RenamingSourceAxisOutsideSignature(AxisId),
-    /// A mapping target did not belong to the target signature.
-    RenamingTargetAxisOutsideSignature(AxisId),
-    /// A source axis occurred more than once in a mapping input.
-    DuplicateSourceAxis(AxisId),
-    /// A target axis had more than one preimage.
-    DuplicateTargetAxis(AxisId),
-    /// A kind-map source was outside the source signature.
-    KindMappingSourceOutsideSignature(K),
-    /// A kind-map target was outside the target signature.
-    KindMappingTargetOutsideSignature(K),
-    /// An identical source-kind mapping was supplied more than once.
-    DuplicateSourceKind(K),
-    /// A target kind had more than one source-kind preimage.
-    DuplicateTargetKind(K),
-    /// One source kind was assigned two different target kinds.
-    ConflictingKindMapping {
-        source_kind: K,
-        first_target: K,
-        second_target: K,
-    },
-    /// Not every distinct source kind was mapped.
-    IncompleteKindRenaming { mapped: usize, source_kinds: usize },
-    /// The kind-map image did not cover the target kinds exactly.
-    NonBijectiveKindRenaming {
-        mapped_targets: usize,
-        target_kinds: usize,
-    },
-    /// An axis mapping disagreed with the validated kind-symbol mapping.
-    AxisKindMappingMismatch {
-        source_axis: AxisId,
-        target_axis: AxisId,
-        mapped_kind: K,
-        target_kind: K,
-    },
-    /// Not every source axis was mapped.
-    IncompleteRenaming { mapped: usize, source_axes: usize },
-    /// The mapped targets did not cover the target signature exactly.
-    NonBijectiveRenaming {
-        mapped_targets: usize,
-        target_axes: usize,
-    },
-    /// Two signature renamings did not share the required middle signature.
-    NonComposableRenamings,
+    /// An axis map is not a total injective renaming.
+    Renaming(RenamingError<AxisId>),
+    /// An axis map induces no single kind map.
+    KindConflict(KindConflict<AxisId, K>),
+    /// A sentence's kind is no kind of the renaming's source.
+    KindOutsideSignature(K),
+    /// A renaming forgets these target axes, so [`IntoStockFlow`] cannot map
+    /// it: a stock-flow renaming may not forget a stock.
+    ForgetsAxes(Vec<AxisId>),
     /// A trace model had fewer than two states.
     TraceTooShort { states: usize },
     /// A trace state's exact axis set differed from its model signature.
@@ -423,6 +270,8 @@ pub enum Error<K> {
     TraceState(TraceStateError),
     /// A translated balance law could not be constructed.
     BalanceLaw(BalanceLawError),
+    /// The stock-flow side of [`IntoStockFlow`] failed.
+    StockFlow(stock_flow::Error<K>),
 }
 
 impl<K: Kind> fmt::Display for Error<K> {
@@ -432,75 +281,16 @@ impl<K: Kind> fmt::Display for Error<K> {
             Self::DuplicateSignatureAxis(axis) => {
                 write!(formatter, "duplicate signature axis {axis}")
             }
-            Self::RenamingSourceAxisOutsideSignature(axis) => {
+            Self::Renaming(error) => write!(formatter, "invalid axis renaming: {error}"),
+            Self::KindConflict(conflict) => write!(formatter, "{conflict}"),
+            Self::KindOutsideSignature(kind) => {
+                write!(formatter, "kind {kind} is outside the renaming's source")
+            }
+            Self::ForgetsAxes(axes) => {
                 write!(
                     formatter,
-                    "renaming source axis {axis} is outside its signature"
+                    "renaming forgets axes {axes:?}, which stock-flow reads as stocks"
                 )
-            }
-            Self::RenamingTargetAxisOutsideSignature(axis) => {
-                write!(
-                    formatter,
-                    "renaming target axis {axis} is outside its signature"
-                )
-            }
-            Self::DuplicateSourceAxis(axis) => write!(formatter, "duplicate source axis {axis}"),
-            Self::DuplicateTargetAxis(axis) => write!(formatter, "duplicate target axis {axis}"),
-            Self::KindMappingSourceOutsideSignature(kind) => {
-                write!(formatter, "kind-map source {kind} is outside its signature")
-            }
-            Self::KindMappingTargetOutsideSignature(kind) => {
-                write!(formatter, "kind-map target {kind} is outside its signature")
-            }
-            Self::DuplicateSourceKind(kind) => write!(formatter, "duplicate source kind {kind}"),
-            Self::DuplicateTargetKind(kind) => write!(formatter, "duplicate target kind {kind}"),
-            Self::ConflictingKindMapping {
-                source_kind,
-                first_target,
-                second_target,
-            } => write!(
-                formatter,
-                "source kind {source_kind} maps to both {first_target} and {second_target}"
-            ),
-            Self::IncompleteKindRenaming {
-                mapped,
-                source_kinds,
-            } => write!(
-                formatter,
-                "kind renaming maps {mapped} of {source_kinds} source kinds"
-            ),
-            Self::NonBijectiveKindRenaming {
-                mapped_targets,
-                target_kinds,
-            } => write!(
-                formatter,
-                "kind renaming covers {mapped_targets} of {target_kinds} target kinds"
-            ),
-            Self::AxisKindMappingMismatch {
-                source_axis,
-                target_axis,
-                mapped_kind,
-                target_kind,
-            } => write!(
-                formatter,
-                "axis renaming {source_axis} to {target_axis}:{target_kind} conflicts with mapped kind {mapped_kind}"
-            ),
-            Self::IncompleteRenaming {
-                mapped,
-                source_axes,
-            } => write!(
-                formatter,
-                "renaming maps {mapped} of {source_axes} source axes"
-            ),
-            Self::NonBijectiveRenaming {
-                mapped_targets,
-                target_axes,
-            } => write!(
-                formatter,
-                "renaming covers {mapped_targets} of {target_axes} target axes"
-            ),
-            Self::NonComposableRenamings => {
-                formatter.write_str("signature renamings are not composable")
             }
             Self::TraceTooShort { states } => {
                 write!(
@@ -529,11 +319,24 @@ impl<K: Kind> fmt::Display for Error<K> {
             Self::Trace(error) => write!(formatter, "malformed trace: {error}"),
             Self::TraceState(error) => write!(formatter, "invalid reduced trace state: {error}"),
             Self::BalanceLaw(error) => write!(formatter, "invalid translated law: {error}"),
+            Self::StockFlow(error) => write!(formatter, "stock-flow: {error}"),
         }
     }
 }
 
 impl<K: Kind> StdError for Error<K> {}
+
+impl<K> From<RenamingError<AxisId>> for Error<K> {
+    fn from(error: RenamingError<AxisId>) -> Self {
+        Self::Renaming(error)
+    }
+}
+
+impl<K> From<BalanceLawError> for Error<K> {
+    fn from(error: BalanceLawError) -> Self {
+        Self::BalanceLaw(error)
+    }
+}
 
 /// The executable institution of exact balance laws and finite traces over kinds `K`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -554,6 +357,16 @@ impl<K> Default for ConservationInstitution<K> {
 }
 
 impl<K: Kind> ConservationInstitution<K> {
+    /// Evaluates a sentence over its model's signature, keeping the verdict
+    /// that [`Institution::satisfies`] reads.
+    pub fn evaluate(
+        sentence: &GradedLaw<K>,
+        model: &TraceModel<K>,
+    ) -> Result<LawVerdict<K>, Error<K>> {
+        Self::validate_sentence(model.signature(), sentence)?;
+        check_law(sentence, model.states()).map_err(Error::Trace)
+    }
+
     fn validate_sentence(
         signature: &ConservationSignature<K>,
         sentence: &GradedLaw<K>,
@@ -587,7 +400,7 @@ impl<K: Kind> ConservationInstitution<K> {
 
 impl<K: Kind> Institution for ConservationInstitution<K> {
     type Signature = ConservationSignature<K>;
-    type SignatureMorphism = AxisRenaming<K>;
+    type SignatureMorphism = Renaming<ConservationSignature<K>>;
     type Sentence = GradedLaw<K>;
     type Model = TraceModel<K>;
     type Error = Error<K>;
@@ -604,7 +417,7 @@ impl<K: Kind> Institution for ConservationInstitution<K> {
         &self,
         signature: &Self::Signature,
     ) -> Result<Self::SignatureMorphism, Self::Error> {
-        AxisRenaming::identity(signature)
+        Renaming::identity(signature)
     }
 
     fn compose(
@@ -612,34 +425,20 @@ impl<K: Kind> Institution for ConservationInstitution<K> {
         first: &Self::SignatureMorphism,
         second: &Self::SignatureMorphism,
     ) -> Result<Self::SignatureMorphism, Self::Error> {
-        AxisRenaming::compose(first, second)
+        first.compose(second)
     }
 
+    /// Translates with the graded translation stock-flow uses.
     fn translate_sentence(
         &self,
         morphism: &Self::SignatureMorphism,
         sentence: &Self::Sentence,
     ) -> Result<Self::Sentence, Self::Error> {
         Self::validate_sentence(morphism.source(), sentence)?;
-        let form = sentence.form();
-        let target_kind = morphism
-            .kind_forward
-            .get(&form.kind())
-            .copied()
-            .ok_or(Error::KindMappingSourceOutsideSignature(form.kind()))?;
-        let mut coefficients = Vec::new();
-        for (source_axis, coefficient) in form.coefficients() {
-            let target_axis =
-                morphism.forward.get(source_axis).cloned().ok_or_else(|| {
-                    Error::RenamingSourceAxisOutsideSignature(source_axis.clone())
-                })?;
-            coefficients.push((target_axis, coefficient.clone()));
-        }
-        let translated = BalanceLaw::new(target_kind, coefficients, *form.provenance())
-            .map_err(Error::BalanceLaw)?;
-        Ok(GradedLaw::new(translated, sentence.grade()))
+        translate_graded(morphism, sentence)
     }
 
+    /// Keeps each state's values on the renaming's image and forgets the rest.
     fn reduct(
         &self,
         morphism: &Self::SignatureMorphism,
@@ -648,18 +447,15 @@ impl<K: Kind> Institution for ConservationInstitution<K> {
         Self::validate_model(morphism.target(), model)?;
         let mut states = Vec::with_capacity(model.states().len());
         for (state_index, target_state) in model.states().iter().enumerate() {
-            let mut source_values = Vec::with_capacity(morphism.inverse.len());
-            for target_axis in target_state.axes() {
-                let source_axis = morphism.inverse.get(target_axis).cloned().ok_or_else(|| {
-                    Error::RenamingTargetAxisOutsideSignature(target_axis.clone())
-                })?;
+            let mut source_values = Vec::with_capacity(morphism.pairs().len());
+            for (source_axis, target_axis) in morphism.pairs() {
                 let value = target_state.value(target_axis).ok_or_else(|| {
                     Error::Trace(TraceError::MissingAxis {
                         state_index,
                         axis: target_axis.clone(),
                     })
                 })?;
-                source_values.push((source_axis, value.clone()));
+                source_values.push((source_axis.clone(), value.clone()));
             }
             states.push(TraceState::new(source_values).map_err(Error::TraceState)?);
         }
@@ -673,10 +469,129 @@ impl<K: Kind> Institution for ConservationInstitution<K> {
         sentence: &Self::Sentence,
     ) -> Result<bool, Self::Error> {
         Self::validate_model(signature, model)?;
-        Self::validate_sentence(signature, sentence)?;
-        match check_law(sentence, model.states()).map_err(Error::Trace)? {
-            LawVerdict::Satisfied(_) => Ok(true),
-            LawVerdict::Violated(_) => Ok(false),
+        Ok(match Self::evaluate(sentence, model)? {
+            LawVerdict::Satisfied(_) => true,
+            LawVerdict::Violated(_) => false,
+        })
+    }
+}
+
+/// The comorphism from conservation into stock-flow: each axis becomes an
+/// unconnected stock, each law a graded state sentence, and a transition
+/// trace reduces to its sequence of stock states.
+///
+/// It is a comorphism on the subcategory of axis-bijective renamings.
+/// Signatures, sentences and models map totally; a renaming that forgets
+/// axes is refused with [`Error::ForgetsAxes`], because its image would forget
+/// stocks, which the stock-flow transition equation reads.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IntoStockFlow<K> {
+    conservation: ConservationInstitution<K>,
+    stock_flow: StockFlowInstitution<K>,
+    id: SentenceId,
+}
+
+impl<K> IntoStockFlow<K> {
+    /// The comorphism that names every translated law `id`.
+    #[must_use]
+    pub const fn new(id: SentenceId) -> Self {
+        Self {
+            conservation: ConservationInstitution::new(),
+            stock_flow: StockFlowInstitution::new(),
+            id,
         }
+    }
+}
+
+impl<K: Kind> Comorphism for IntoStockFlow<K> {
+    type Source = ConservationInstitution<K>;
+    type Target = StockFlowInstitution<K>;
+    type Error = Error<K>;
+
+    fn source_institution(&self) -> &Self::Source {
+        &self.conservation
+    }
+
+    fn target_institution(&self) -> &Self::Target {
+        &self.stock_flow
+    }
+
+    fn map_signature(
+        &self,
+        signature: &ConservationSignature<K>,
+    ) -> Result<StockFlowSignature<K>, Error<K>> {
+        let stock = |axis: &AxisId| {
+            StockId::new(axis.as_str()).expect("an axis identifier is a nonblank stock identifier")
+        };
+        let topology = FlowTopology::new(
+            signature.axes().map(|(axis, kind)| StockDefinition {
+                id: stock(axis),
+                kind,
+            }),
+            [],
+            [],
+        )
+        .map_err(|error| Error::StockFlow(StockFlowError::from(error).into()))?;
+        let carrier = StockFlowCarrier::new(
+            Arc::new(topology),
+            signature.axes().map(|(axis, _)| StockAxisDefinition {
+                stock: stock(axis),
+                axis: axis.clone(),
+            }),
+            [],
+            [],
+        )
+        .map_err(|error| Error::StockFlow(error.into()))?;
+        Ok(StockFlowSignature::new(Arc::new(carrier)))
+    }
+
+    fn map_signature_morphism(
+        &self,
+        morphism: &Renaming<ConservationSignature<K>>,
+    ) -> Result<Renaming<StockFlowSignature<K>>, Error<K>> {
+        let forgotten = morphism
+            .target()
+            .symbols()
+            .into_iter()
+            .filter(|axis| morphism.preimage(axis).is_none())
+            .collect::<Vec<_>>();
+        if !forgotten.is_empty() {
+            return Err(Error::ForgetsAxes(forgotten));
+        }
+        Renaming::new(
+            self.map_signature(morphism.source())?,
+            self.map_signature(morphism.target())?,
+            morphism
+                .pairs()
+                .map(|(from, to)| (from.symbol_id(), to.symbol_id())),
+        )
+        .map_err(Error::StockFlow)
+    }
+
+    fn translate_sentence(
+        &self,
+        signature: &ConservationSignature<K>,
+        sentence: &GradedLaw<K>,
+    ) -> Result<StockFlowSentence<K>, Error<K>> {
+        ConservationInstitution::validate_sentence(signature, sentence)?;
+        Ok(StockFlowSentence::Graded(GradedStateLaw::new(
+            self.id.clone(),
+            sentence.clone(),
+        )))
+    }
+
+    fn reduct(
+        &self,
+        signature: &ConservationSignature<K>,
+        model: &StockFlowModel<K>,
+    ) -> Result<TraceModel<K>, Error<K>> {
+        if model.signature() != &self.map_signature(signature)? {
+            return Err(Error::StockFlow(stock_flow::Error::ModelSignatureMismatch));
+        }
+        let states = model
+            .trace()
+            .graded_states()
+            .map_err(|error| Error::StockFlow(error.into()))?;
+        TraceModel::new(signature.clone(), states)
     }
 }

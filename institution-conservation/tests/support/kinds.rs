@@ -17,12 +17,9 @@ pub enum FixtureKind {
     Money,
     NeutralEnergy,
     NeutralQuantity,
-    Outside,
     Q1,
     Q2,
     Quantity,
-    R1,
-    R2,
 }
 
 impl fmt::Display for FixtureKind {

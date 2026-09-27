@@ -1,7 +1,8 @@
 //! Institution adapter for exact stock-flow sentences and transition traces.
 //!
 //! Stock-flow adds process, boundary and ledger structure to the graded
-//! conservation sentences of [`crate::ConservationInstitution`].
+//! conservation sentences of [`crate::ConservationInstitution`], which maps
+//! into this institution through the comorphism [`crate::IntoStockFlow`].
 //!
 //! A signature morphism is a [`Renaming`] of carrier symbols. It may forget
 //! ledgers and their projected axes. It may not forget a stock axis, flow or
@@ -15,7 +16,7 @@ use std::marker::PhantomData;
 use std::mem::discriminant;
 use std::sync::Arc;
 
-use conservation_core::{AxisId, BalanceLaw, GradedLaw, Kind};
+use conservation_core::{AxisId, BalanceLaw, BalanceLawError, GradedLaw, Kind};
 use conservation_stock_flow::{
     BoundaryCorrespondence, BoundaryId, BoundaryVerdict, CarrierIdentity, ExactAmounts,
     FlowConstraintVerdict, FlowId, GradedStateLaw, LedgerId, LinearFlowConstraint, OpenBalance,
@@ -605,38 +606,72 @@ impl<K: Kind> StockFlowInstitution<K> {
     }
 }
 
-/// Translates a graded law along `renaming`.
-pub(crate) fn translate_graded<K: Kind>(
-    renaming: &Renaming<StockFlowSignature<K>>,
-    law: &GradedLaw<K>,
-) -> Result<GradedLaw<K>, Error<K>> {
+/// A kinded vocabulary with axes, along whose renamings graded laws translate.
+pub(crate) trait AxisVocabulary: Kinded {
+    /// The image of a source axis.
+    fn axis_image<'a>(
+        renaming: &'a Renaming<Self>,
+        axis: &AxisId,
+    ) -> Result<&'a AxisId, Self::Error>;
+
+    /// The failure when a law's kind is no kind of the renaming's source.
+    fn unknown_kind(kind: Self::Kind) -> Self::Error;
+}
+
+impl<K: Kind> AxisVocabulary for StockFlowSignature<K> {
+    fn axis_image<'a>(renaming: &'a Renaming<Self>, axis: &AxisId) -> Result<&'a AxisId, Error<K>> {
+        image(renaming, axis)
+    }
+
+    fn unknown_kind(kind: K) -> Error<K> {
+        Error::Carrier(StockFlowError::UnknownKind(kind))
+    }
+}
+
+/// Translates a graded law along `renaming`. This is the one graded
+/// translation: stock-flow's graded and open-balance sentences and
+/// [`crate::ConservationInstitution`] all use it.
+pub(crate) fn translate_graded<V>(
+    renaming: &Renaming<V>,
+    law: &GradedLaw<V::Kind>,
+) -> Result<GradedLaw<V::Kind>, V::Error>
+where
+    V: AxisVocabulary,
+    V::Error: From<BalanceLawError>,
+{
     Ok(GradedLaw::new(
         translate_form(renaming, law.form())?,
         law.grade(),
     ))
 }
 
-fn translate_form<K: Kind>(
-    renaming: &Renaming<StockFlowSignature<K>>,
-    form: &BalanceLaw<K>,
-) -> Result<BalanceLaw<K>, Error<K>> {
+fn translate_form<V>(
+    renaming: &Renaming<V>,
+    form: &BalanceLaw<V::Kind>,
+) -> Result<BalanceLaw<V::Kind>, V::Error>
+where
+    V: AxisVocabulary,
+    V::Error: From<BalanceLawError>,
+{
     let mut coefficients = Vec::with_capacity(form.coefficients().len());
     for (axis, coefficient) in form.coefficients() {
-        coefficients.push((image(renaming, axis)?.clone(), coefficient.clone()));
+        coefficients.push((V::axis_image(renaming, axis)?.clone(), coefficient.clone()));
     }
-    BalanceLaw::new(
-        translate_kind(renaming, form.kind())?,
-        coefficients,
-        *form.provenance(),
-    )
-    .map_err(|error| Error::Carrier(StockFlowError::from(error)))
+    let kind = kind_image(renaming, form.kind()).ok_or_else(|| V::unknown_kind(form.kind()))?;
+    Ok(BalanceLaw::new(kind, coefficients, *form.provenance())?)
+}
+
+impl<K: Kind> From<BalanceLawError> for Error<K> {
+    fn from(error: BalanceLawError) -> Self {
+        Self::Carrier(StockFlowError::from(error))
+    }
 }
 
 fn translate_kind<K: Kind>(
     renaming: &Renaming<StockFlowSignature<K>>,
     kind: K,
 ) -> Result<K, Error<K>> {
-    kind_image(renaming, kind).ok_or(Error::Carrier(StockFlowError::UnknownKind(kind)))
+    kind_image(renaming, kind).ok_or_else(|| StockFlowSignature::unknown_kind(kind))
 }
 
 /// Restricts target amounts to the renaming's image and renames them back,

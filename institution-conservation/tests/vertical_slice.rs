@@ -2,9 +2,15 @@ mod support;
 
 use conservation_core::{AxisId, BalanceLaw, GradedLaw, Provenance};
 use conservation_linear::{NullspaceSource, TransitionMatrix, derive_left_nullspace};
+use conservation_trace::LawVerdict;
 use conservation_trace::TraceState;
 use institution::{Institution, laws};
-use institution_conservation::{AxisRenaming, ConservationSignature, Error, TraceModel};
+use institution::{Renaming, RenamingError};
+use institution_conservation::{
+    ConservationInstitution, ConservationSignature, Error, KindConflict, TraceModel,
+};
+
+type AxisRenaming = Renaming<ConservationSignature<FixtureKind>>;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use support::{CONSERVATION, FixtureKind};
@@ -53,9 +59,9 @@ fn derive_law(
 struct SharedCases {
     source: ConservationSignature<FixtureKind>,
     law: GradedLaw<FixtureKind>,
-    ecological_renaming: AxisRenaming<FixtureKind>,
+    ecological_renaming: AxisRenaming,
     ecological_model: TraceModel<FixtureKind>,
-    economic_renaming: AxisRenaming<FixtureKind>,
+    economic_renaming: AxisRenaming,
     economic_model: TraceModel<FixtureKind>,
 }
 
@@ -84,7 +90,6 @@ fn shared_neutral_cases() -> SharedCases {
             (axis("neutral_left"), axis("consumer_pool")),
             (axis("neutral_right"), axis("producer_pool")),
         ],
-        [(FixtureKind::NeutralQuantity, FixtureKind::Biomass)],
     )
     .unwrap();
     let ecological_model = TraceModel::new(
@@ -107,7 +112,6 @@ fn shared_neutral_cases() -> SharedCases {
             (axis("neutral_left"), axis("asset_account")),
             (axis("neutral_right"), axis("stock_account")),
         ],
-        [(FixtureKind::NeutralQuantity, FixtureKind::Money)],
     )
     .unwrap();
     let economic_model = TraceModel::new(
@@ -239,7 +243,6 @@ fn asymmetric_stoichiometric_law_exposes_translation_and_reduct_direction() {
         source.clone(),
         target.clone(),
         [(axis("left"), axis("zeta")), (axis("right"), axis("alpha"))],
-        [(FixtureKind::Quantity, FixtureKind::Measure)],
     )
     .unwrap();
     let target_model = TraceModel::new(
@@ -321,27 +324,17 @@ fn signatures_axis_maps_and_models_retain_their_validation() {
 
     let source = signature(&[("A", FixtureKind::Quantity), ("B", FixtureKind::Quantity)]);
     let target = signature(&[("X", FixtureKind::Measure), ("Y", FixtureKind::Measure)]);
-    let kind_map = [(FixtureKind::Quantity, FixtureKind::Measure)];
     assert_eq!(
-        AxisRenaming::new(
-            source.clone(),
-            target.clone(),
-            [(axis("A"), axis("X"))],
-            kind_map,
-        ),
-        Err(Error::IncompleteRenaming {
-            mapped: 1,
-            source_axes: 2,
-        })
+        AxisRenaming::new(source.clone(), target.clone(), [(axis("A"), axis("X"))]),
+        Err(Error::Renaming(RenamingError::Unnamed(axis("B"))))
     );
     assert_eq!(
         AxisRenaming::new(
             source.clone(),
             target,
             [(axis("A"), axis("X")), (axis("B"), axis("X"))],
-            kind_map,
         ),
-        Err(Error::DuplicateTargetAxis(axis("X")))
+        Err(Error::Renaming(RenamingError::NotInjective(axis("X"))))
     );
 
     assert_eq!(
@@ -358,121 +351,54 @@ fn signatures_axis_maps_and_models_retain_their_validation() {
 }
 
 #[test]
-fn kind_maps_reject_missing_extra_duplicate_conflicting_and_nonbijective_entries() {
-    let source = signature(&[("A", FixtureKind::Q1), ("B", FixtureKind::Q2)]);
-    let target = signature(&[("X", FixtureKind::R1), ("Y", FixtureKind::R2)]);
-    let axes = [(axis("A"), axis("X")), (axis("B"), axis("Y"))];
-
-    assert_eq!(
-        AxisRenaming::new(
-            source.clone(),
-            target.clone(),
-            axes.clone(),
-            [(FixtureKind::Q1, FixtureKind::R1)],
-        ),
-        Err(Error::IncompleteKindRenaming {
-            mapped: 1,
-            source_kinds: 2,
-        })
-    );
-    assert_eq!(
-        AxisRenaming::new(
-            source.clone(),
-            target.clone(),
-            axes.clone(),
-            [
-                (FixtureKind::Q1, FixtureKind::R1),
-                (FixtureKind::Q2, FixtureKind::R2),
-                (FixtureKind::Outside, FixtureKind::R1),
-            ],
-        ),
-        Err(Error::KindMappingSourceOutsideSignature(
-            FixtureKind::Outside
-        ))
-    );
-    assert_eq!(
-        AxisRenaming::new(
-            source.clone(),
-            target.clone(),
-            axes.clone(),
-            [
-                (FixtureKind::Q1, FixtureKind::R1),
-                (FixtureKind::Q2, FixtureKind::Outside),
-            ],
-        ),
-        Err(Error::KindMappingTargetOutsideSignature(
-            FixtureKind::Outside
-        ))
-    );
-    assert_eq!(
-        AxisRenaming::new(
-            source.clone(),
-            target.clone(),
-            axes.clone(),
-            [
-                (FixtureKind::Q1, FixtureKind::R1),
-                (FixtureKind::Q1, FixtureKind::R1),
-            ],
-        ),
-        Err(Error::DuplicateSourceKind(FixtureKind::Q1))
-    );
-    assert!(matches!(
-        AxisRenaming::new(
-            source.clone(),
-            target.clone(),
-            axes.clone(),
-            [
-                (FixtureKind::Q1, FixtureKind::R1),
-                (FixtureKind::Q1, FixtureKind::R2),
-            ],
-        ),
-        Err(Error::ConflictingKindMapping { .. })
-    ));
-    assert_eq!(
-        AxisRenaming::new(
-            source.clone(),
-            target.clone(),
-            axes.clone(),
-            [
-                (FixtureKind::Q1, FixtureKind::R1),
-                (FixtureKind::Q2, FixtureKind::R1),
-            ],
-        ),
-        Err(Error::DuplicateTargetKind(FixtureKind::R1))
-    );
-
-    let target_with_extra_kind = signature(&[
-        ("X", FixtureKind::R1),
-        ("Y", FixtureKind::R1),
-        ("Z", FixtureKind::R2),
+fn the_kind_map_is_derived_from_the_axis_map() {
+    let source = signature(&[("A", FixtureKind::Q1), ("B", FixtureKind::Q1)]);
+    let target = signature(&[
+        ("X", FixtureKind::Mass),
+        ("Y", FixtureKind::Energy),
+        ("Z", FixtureKind::Mass),
     ]);
-    let one_kind_source = signature(&[("A", FixtureKind::Q1), ("B", FixtureKind::Q1)]);
     assert_eq!(
         AxisRenaming::new(
-            one_kind_source,
-            target_with_extra_kind,
+            source.clone(),
+            target.clone(),
             [(axis("A"), axis("X")), (axis("B"), axis("Y"))],
-            [(FixtureKind::Q1, FixtureKind::R1)],
         ),
-        Err(Error::NonBijectiveKindRenaming {
-            mapped_targets: 1,
-            target_kinds: 2,
-        })
+        Err(Error::KindConflict(KindConflict {
+            symbol: axis("B"),
+            kind: FixtureKind::Q1,
+            first: FixtureKind::Mass,
+            second: FixtureKind::Energy,
+        }))
     );
 
-    let mismatched_axes = [(axis("A"), axis("Y")), (axis("B"), axis("X"))];
-    assert!(matches!(
+    let renaming = AxisRenaming::new(
+        source,
+        target,
+        [(axis("A"), axis("X")), (axis("B"), axis("Z"))],
+    )
+    .unwrap();
+    let law = GradedLaw::from(
+        BalanceLaw::new(FixtureKind::Q1, [(axis("A"), q(1))], Provenance::Declared).unwrap(),
+    );
+    assert_eq!(
+        CONSERVATION
+            .translate_sentence(&renaming, &law)
+            .unwrap()
+            .form()
+            .kind(),
+        FixtureKind::Mass
+    );
+
+    // Two kinds may share an image; the map need not be injective.
+    assert!(
         AxisRenaming::new(
-            source,
-            target,
-            mismatched_axes,
-            [
-                (FixtureKind::Q1, FixtureKind::R1),
-                (FixtureKind::Q2, FixtureKind::R2)
-            ],
-        ),
-        Err(Error::AxisKindMappingMismatch { .. })
-    ));
+            signature(&[("A", FixtureKind::Q1), ("B", FixtureKind::Q2)]),
+            signature(&[("X", FixtureKind::Mass), ("Y", FixtureKind::Mass)]),
+            [(axis("A"), axis("X")), (axis("B"), axis("Y"))],
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -525,21 +451,18 @@ fn conservation_adapter_observes_signature_category_and_functor_laws() {
         source.clone(),
         middle,
         [(axis("A"), axis("X")), (axis("B"), axis("Y"))],
-        [(FixtureKind::Quantity, FixtureKind::Mass)],
     )
     .unwrap();
     let second = AxisRenaming::new(
         first.target().clone(),
         target.clone(),
         [(axis("X"), axis("U")), (axis("Y"), axis("V"))],
-        [(FixtureKind::Mass, FixtureKind::Energy)],
     )
     .unwrap();
     let third = AxisRenaming::new(
         target.clone(),
         last,
         [(axis("U"), axis("I")), (axis("V"), axis("J"))],
-        [(FixtureKind::Energy, FixtureKind::Currency)],
     )
     .unwrap();
     let law = GradedLaw::from(
@@ -563,4 +486,182 @@ fn conservation_adapter_observes_signature_category_and_functor_laws() {
     assert!(laws::check_sentence_composition(&institution, &first, &second, &law,).unwrap());
     assert!(laws::check_model_identity(&institution, &target, &model).unwrap());
     assert!(laws::check_model_composition(&institution, &first, &second, &model,).unwrap());
+}
+
+fn two_axes() -> ConservationSignature<FixtureKind> {
+    signature(&[("A", FixtureKind::Quantity), ("B", FixtureKind::Quantity)])
+}
+
+fn three_axes() -> ConservationSignature<FixtureKind> {
+    signature(&[
+        ("X", FixtureKind::Mass),
+        ("Y", FixtureKind::Mass),
+        ("Z", FixtureKind::Mass),
+    ])
+}
+
+/// Renames `A` and `B` into `X` and `Y`, forgetting `Z`.
+fn forgetting_z() -> AxisRenaming {
+    AxisRenaming::new(
+        two_axes(),
+        three_axes(),
+        [(axis("A"), axis("X")), (axis("B"), axis("Y"))],
+    )
+    .unwrap()
+}
+
+fn total_of_a_and_b() -> GradedLaw<FixtureKind> {
+    GradedLaw::from(
+        BalanceLaw::new(
+            FixtureKind::Quantity,
+            [(axis("A"), q(1)), (axis("B"), q(1))],
+            Provenance::Declared,
+        )
+        .unwrap(),
+    )
+}
+
+/// `X + Y` is constant while the forgotten `Z` jumps.
+fn z_jumps() -> TraceModel<FixtureKind> {
+    TraceModel::new(
+        three_axes(),
+        vec![
+            state(&[("X", 3), ("Y", 7), ("Z", 0)]),
+            state(&[("X", 4), ("Y", 6), ("Z", 50)]),
+        ],
+    )
+    .unwrap()
+}
+
+#[test]
+fn forgetting_an_axis_keeps_the_square_with_both_truth_values() {
+    let renaming = forgetting_z();
+    let law = total_of_a_and_b();
+
+    let reduced = CONSERVATION.reduct(&renaming, &z_jumps()).unwrap();
+    assert_eq!(reduced.signature(), &two_axes());
+    assert_eq!(reduced.states()[1].axes().count(), 2);
+
+    let kept = laws::check_satisfaction_square(&CONSERVATION, &renaming, &law, &z_jumps()).unwrap();
+    assert!(kept.holds());
+    assert!(kept.translated_sentence_satisfied());
+
+    let leaking = TraceModel::new(
+        three_axes(),
+        vec![
+            state(&[("X", 3), ("Y", 7), ("Z", 0)]),
+            state(&[("X", 4), ("Y", 7), ("Z", 0)]),
+        ],
+    )
+    .unwrap();
+    let broken = laws::check_satisfaction_square(&CONSERVATION, &renaming, &law, &leaking).unwrap();
+    assert!(broken.holds());
+    assert!(!broken.translated_sentence_satisfied());
+}
+
+/// The conservation institution, except that sentences translate along a
+/// renaming that sends `B` to the forgotten `Z`.
+struct TranslatesIntoZ;
+
+impl Institution for TranslatesIntoZ {
+    type Signature = ConservationSignature<FixtureKind>;
+    type SignatureMorphism = AxisRenaming;
+    type Sentence = GradedLaw<FixtureKind>;
+    type Model = TraceModel<FixtureKind>;
+    type Error = Error<FixtureKind>;
+
+    fn source<'a>(&self, morphism: &'a Self::SignatureMorphism) -> &'a Self::Signature {
+        CONSERVATION.source(morphism)
+    }
+
+    fn target<'a>(&self, morphism: &'a Self::SignatureMorphism) -> &'a Self::Signature {
+        CONSERVATION.target(morphism)
+    }
+
+    fn identity(
+        &self,
+        signature: &Self::Signature,
+    ) -> Result<Self::SignatureMorphism, Self::Error> {
+        CONSERVATION.identity(signature)
+    }
+
+    fn compose(
+        &self,
+        first: &Self::SignatureMorphism,
+        second: &Self::SignatureMorphism,
+    ) -> Result<Self::SignatureMorphism, Self::Error> {
+        CONSERVATION.compose(first, second)
+    }
+
+    fn translate_sentence(
+        &self,
+        morphism: &Self::SignatureMorphism,
+        sentence: &Self::Sentence,
+    ) -> Result<Self::Sentence, Self::Error> {
+        let stale = AxisRenaming::new(
+            morphism.source().clone(),
+            morphism.target().clone(),
+            [(axis("A"), axis("X")), (axis("B"), axis("Z"))],
+        )?;
+        CONSERVATION.translate_sentence(&stale, sentence)
+    }
+
+    fn reduct(
+        &self,
+        morphism: &Self::SignatureMorphism,
+        model: &Self::Model,
+    ) -> Result<Self::Model, Self::Error> {
+        CONSERVATION.reduct(morphism, model)
+    }
+
+    fn satisfies(
+        &self,
+        signature: &Self::Signature,
+        model: &Self::Model,
+        sentence: &Self::Sentence,
+    ) -> Result<bool, Self::Error> {
+        CONSERVATION.satisfies(signature, model, sentence)
+    }
+}
+
+#[test]
+fn a_translation_into_the_forgotten_axis_breaks_the_square() {
+    let square = laws::check_satisfaction_square(
+        &TranslatesIntoZ,
+        &forgetting_z(),
+        &total_of_a_and_b(),
+        &z_jumps(),
+    )
+    .unwrap();
+    assert!(!square.holds());
+    assert!(!square.translated_sentence_satisfied());
+    assert!(square.reduced_model_satisfies_source_sentence());
+}
+
+#[test]
+fn evaluation_returns_the_verdict_satisfaction_reads() {
+    let law = total_of_a_and_b();
+    let holding = CONSERVATION.reduct(&forgetting_z(), &z_jumps()).unwrap();
+    let leaking = TraceModel::new(
+        two_axes(),
+        vec![state(&[("A", 3), ("B", 7)]), state(&[("A", 4), ("B", 7)])],
+    )
+    .unwrap();
+
+    assert!(matches!(
+        ConservationInstitution::evaluate(&law, &holding),
+        Ok(LawVerdict::Satisfied(_))
+    ));
+    assert_eq!(
+        CONSERVATION.satisfies(&two_axes(), &holding, &law),
+        Ok(true)
+    );
+    assert!(matches!(
+        ConservationInstitution::evaluate(&law, &leaking),
+        Ok(LawVerdict::Violated(_))
+    ));
+    assert_eq!(
+        CONSERVATION.satisfies(&two_axes(), &leaking, &law),
+        Ok(false)
+    );
 }
