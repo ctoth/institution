@@ -14,9 +14,80 @@ use std::marker::PhantomData;
 
 use conservation_core::{AxisId, BalanceLaw, BalanceLawError, GradedLaw, Kind};
 use conservation_trace::{LawVerdict, TraceError, TraceState, TraceStateError, check_law};
-use institution::Institution;
+use institution::{Institution, Renaming, Vocabulary};
 
 pub mod stock_flow;
+
+/// A vocabulary whose every symbol carries a quantity kind.
+///
+/// A renaming's kind map is not supplied beside its symbol map: it is derived
+/// from it, sending each source symbol's kind to its image's kind.
+pub(crate) trait Kinded: Vocabulary {
+    type Kind: Kind;
+
+    /// The kind of a symbol of this vocabulary.
+    fn kind_of(&self, symbol: &Self::Symbol) -> Option<Self::Kind>;
+}
+
+/// A symbol whose image gives its kind a second image.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KindConflict<S, K> {
+    /// The source symbol whose image disagrees.
+    pub symbol: S,
+    /// The kind of `symbol`.
+    pub kind: K,
+    /// The image of `kind` given by earlier symbols.
+    pub first: K,
+    /// The kind of the image of `symbol`.
+    pub second: K,
+}
+
+impl<S: fmt::Debug, K: Kind> fmt::Display for KindConflict<S, K> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "kind {} goes to {} but the image of {:?} is {}",
+            self.kind, self.first, self.symbol, self.second
+        )
+    }
+}
+
+/// Checks that `renaming` induces one kind map: every source symbol of one
+/// kind has an image of one kind. The map need not be injective.
+pub(crate) fn check_derived_kinds<V: Kinded>(
+    renaming: &Renaming<V>,
+) -> Result<(), KindConflict<V::Symbol, V::Kind>> {
+    let mut kinds = BTreeMap::new();
+    for (from, to) in renaming.pairs() {
+        let kind = symbol_kind(renaming.source(), from);
+        let image = symbol_kind(renaming.target(), to);
+        if let Some(first) = kinds.insert(kind, image) {
+            if first != image {
+                return Err(KindConflict {
+                    symbol: from.clone(),
+                    kind,
+                    first,
+                    second: image,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The kind `renaming` sends `kind` to, when `kind` is a kind of its source.
+pub(crate) fn kind_image<V: Kinded>(renaming: &Renaming<V>, kind: V::Kind) -> Option<V::Kind> {
+    renaming
+        .pairs()
+        .find(|(from, _)| symbol_kind(renaming.source(), from) == kind)
+        .map(|(_, to)| symbol_kind(renaming.target(), to))
+}
+
+pub(crate) fn symbol_kind<V: Kinded>(vocabulary: &V, symbol: &V::Symbol) -> V::Kind {
+    vocabulary
+        .kind_of(symbol)
+        .expect("a validated renaming names only its vocabularies' symbols")
+}
 
 /// A nonempty assignment of every axis to its quantitative kind.
 #[derive(Clone, Debug, Eq, PartialEq)]

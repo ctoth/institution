@@ -2,16 +2,15 @@ mod support;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use conservation_stock_flow::{FlowId, TransitionEquation};
+use conservation_stock_flow::{FlowId, Symbol, SymbolId, TransitionEquation};
 use institution::comorphism::ComorphismError;
 use institution::join::{
     Bridge, Join, JoinError, JoinedModel, JoinedSentence, JoinedSignature, JoinedSignatureMorphism,
     Pair,
 };
-use institution::{Comorphism, Institution, laws};
+use institution::{Comorphism, Institution, Renaming, laws};
 use institution_conservation::stock_flow::{
-    Error, StockFlowInstitution, StockFlowModel, StockFlowRenaming, StockFlowSentence,
-    StockFlowSignature,
+    Error, StockFlowInstitution, StockFlowModel, StockFlowSentence, StockFlowSignature,
 };
 use num_rational::BigRational;
 use support::*;
@@ -282,12 +281,12 @@ impl Bridge for SettlementBridge {
         morphism: &JoinedSignatureMorphism<Self>,
         sentence: &SettledProduct,
     ) -> Result<SettledProduct, SettlementError> {
-        let flow = morphism
-            .parts()
-            .right
-            .map_flow(&sentence.flow)
-            .cloned()
-            .ok_or_else(|| SettlementError::UnknownFlow(sentence.flow.clone()))?;
+        let flow = match morphism.parts().right.image(&sentence.flow.symbol_id()) {
+            Some(SymbolId::Flow(flow)) => flow.clone(),
+            Some(SymbolId::Axis(_) | SymbolId::Boundary(_) | SymbolId::Ledger(_)) | None => {
+                return Err(SettlementError::UnknownFlow(sentence.flow.clone()));
+            }
+        };
         let names = &morphism.parts().left;
         Ok(SettledProduct {
             flow,
@@ -490,7 +489,7 @@ where
 {
     join.morphism(
         collapsing_map(),
-        StockFlowRenaming::identity(&signature(NEUTRAL)),
+        Renaming::identity(&signature(NEUTRAL)).unwrap(),
     )
 }
 

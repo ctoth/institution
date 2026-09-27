@@ -7,12 +7,13 @@ use conservation_dynamics::{FlowSpec, FlowTopology, ProcessId, StockDefinition, 
 use conservation_stock_flow::{
     BoundaryCorrespondence, BoundaryId, ChannelId, ExactAmounts, FlowId, GradedStateLaw,
     LedgerDefinition, LedgerId, LinearFlowConstraint, SentenceId, StockAxisDefinition,
-    StockFlowCarrier, Symbol, TransitionEquation, TransitionRecord, TransitionRecordData,
+    StockFlowCarrier, Symbol, SymbolId, TransitionEquation, TransitionRecord, TransitionRecordData,
     TransitionTrace, certify_nullspace,
 };
+use institution::Renaming;
 use institution_conservation::ConservationInstitution;
 use institution_conservation::stock_flow::{
-    StockFlowInstitution, StockFlowModel, StockFlowRenaming, StockFlowSentence, StockFlowSignature,
+    StockFlowInstitution, StockFlowModel, StockFlowSentence, StockFlowSignature,
 };
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -131,7 +132,27 @@ pub fn amounts<I: Symbol>(
 }
 
 pub fn signature(names: Names) -> StockFlowSignature<FixtureKind> {
+    signature_with(names, true)
+}
+
+/// The two-stock carrier of `names`, with its output ledger only when
+/// `output_ledger` is set.
+pub fn signature_with(names: Names, output_ledger: bool) -> StockFlowSignature<FixtureKind> {
     let quantity = names.kind;
+    let mut ledgers = vec![LedgerDefinition {
+        id: ledger(names.input_ledger),
+        axis: axis(names.input_ledger_axis),
+        kind: quantity,
+        boundaries: vec![boundary(names.input)],
+    }];
+    if output_ledger {
+        ledgers.push(LedgerDefinition {
+            id: ledger(names.output_ledger),
+            axis: axis(names.output_ledger_axis),
+            kind: quantity,
+            boundaries: vec![boundary(names.output)],
+        });
+    }
     let left = StockId::new(names.left_stock).unwrap();
     let right = StockId::new(names.right_stock).unwrap();
     let topology = FlowTopology::new(
@@ -185,23 +206,59 @@ pub fn signature(names: Names) -> StockFlowSignature<FixtureKind> {
             ChannelId::Boundary(boundary(names.input)),
             ChannelId::Boundary(boundary(names.output)),
         ],
-        [
-            LedgerDefinition {
-                id: ledger(names.input_ledger),
-                axis: axis(names.input_ledger_axis),
-                kind: quantity,
-                boundaries: vec![boundary(names.input)],
-            },
-            LedgerDefinition {
-                id: ledger(names.output_ledger),
-                axis: axis(names.output_ledger_axis),
-                kind: quantity,
-                boundaries: vec![boundary(names.output)],
-            },
-        ],
+        ledgers,
     )
     .unwrap();
     StockFlowSignature::new(Arc::new(carrier))
+}
+
+/// Every symbol of the input-ledger-only carrier of `source_names`, paired
+/// with its namesake in `target_names`.
+pub fn shared_pairs(source_names: Names, target_names: Names) -> Vec<(SymbolId, SymbolId)> {
+    vec![
+        (
+            axis(source_names.left_axis).symbol_id(),
+            axis(target_names.left_axis).symbol_id(),
+        ),
+        (
+            axis(source_names.right_axis).symbol_id(),
+            axis(target_names.right_axis).symbol_id(),
+        ),
+        (
+            axis(source_names.input_ledger_axis).symbol_id(),
+            axis(target_names.input_ledger_axis).symbol_id(),
+        ),
+        (
+            flow(source_names.flow).symbol_id(),
+            flow(target_names.flow).symbol_id(),
+        ),
+        (
+            boundary(source_names.input).symbol_id(),
+            boundary(target_names.input).symbol_id(),
+        ),
+        (
+            boundary(source_names.output).symbol_id(),
+            boundary(target_names.output).symbol_id(),
+        ),
+        (
+            ledger(source_names.input_ledger).symbol_id(),
+            ledger(target_names.input_ledger).symbol_id(),
+        ),
+    ]
+}
+
+/// The renaming from the input-ledger-only carrier of `source_names` into the
+/// full carrier of `target_names`. It forgets the output ledger and its axis.
+pub fn forgetting_renaming(
+    source_names: Names,
+    target_names: Names,
+) -> Renaming<StockFlowSignature<FixtureKind>> {
+    Renaming::new(
+        signature_with(source_names, false),
+        signature(target_names),
+        shared_pairs(source_names, target_names),
+    )
+    .unwrap()
 }
 
 pub fn renaming(
@@ -209,40 +266,17 @@ pub fn renaming(
     source: StockFlowSignature<FixtureKind>,
     target_names: Names,
     target: StockFlowSignature<FixtureKind>,
-) -> StockFlowRenaming<FixtureKind> {
-    StockFlowRenaming::new(
-        source,
-        target,
-        [(source_names.kind, target_names.kind)],
-        [
-            (axis(source_names.left_axis), axis(target_names.left_axis)),
-            (axis(source_names.right_axis), axis(target_names.right_axis)),
-            (
-                axis(source_names.input_ledger_axis),
-                axis(target_names.input_ledger_axis),
-            ),
-            (
-                axis(source_names.output_ledger_axis),
-                axis(target_names.output_ledger_axis),
-            ),
-        ],
-        [(flow(source_names.flow), flow(target_names.flow))],
-        [
-            (boundary(source_names.input), boundary(target_names.input)),
-            (boundary(source_names.output), boundary(target_names.output)),
-        ],
-        [
-            (
-                ledger(source_names.input_ledger),
-                ledger(target_names.input_ledger),
-            ),
-            (
-                ledger(source_names.output_ledger),
-                ledger(target_names.output_ledger),
-            ),
-        ],
-    )
-    .unwrap()
+) -> Renaming<StockFlowSignature<FixtureKind>> {
+    let mut pairs = shared_pairs(source_names, target_names);
+    pairs.push((
+        axis(source_names.output_ledger_axis).symbol_id(),
+        axis(target_names.output_ledger_axis).symbol_id(),
+    ));
+    pairs.push((
+        ledger(source_names.output_ledger).symbol_id(),
+        ledger(target_names.output_ledger).symbol_id(),
+    ));
+    Renaming::new(source, target, pairs).unwrap()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -301,6 +335,32 @@ pub fn model_with_values(
         },
     )
     .unwrap();
+    let trace = TransitionTrace::new(signature.carrier().clone(), vec![record]).unwrap();
+    StockFlowModel::new(signature.clone(), trace).unwrap()
+}
+
+/// `model` with its output ledger moved by `drift` more than its ports explain.
+pub fn with_output_ledger_drift(
+    model: &StockFlowModel<FixtureKind>,
+    names: Names,
+    drift: i64,
+) -> StockFlowModel<FixtureKind> {
+    let signature = model.signature();
+    let mut data = model.trace().records()[0].clone().into_data();
+    let ledger_after = data
+        .ledger_after
+        .iter()
+        .map(|(id, kind, amount)| {
+            let amount = if id == &ledger(names.output_ledger) {
+                amount + q(drift)
+            } else {
+                amount.clone()
+            };
+            (id.clone(), kind, amount)
+        })
+        .collect::<Vec<_>>();
+    data.ledger_after = amounts(ledger_after);
+    let record = TransitionRecord::new(signature.carrier(), data).unwrap();
     let trace = TransitionTrace::new(signature.carrier().clone(), vec![record]).unwrap();
     StockFlowModel::new(signature.clone(), trace).unwrap()
 }
